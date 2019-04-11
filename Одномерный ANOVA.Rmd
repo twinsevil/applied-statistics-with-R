@@ -1,0 +1,104 @@
+---
+title: "Дисперсионный анализ (ANOVA)"
+author: "Литвинцев И.С"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Одномерный однофакторный дисперсионный анализ 
+
+### 1. Подготовка данных
+
+```{r data}
+data <- read.table("C:/Users/806263/Desktop/SPbU/Магистратура Матмех (2017-2019)/Применение статистических методов к реальным данным/Данные/cities (данные по американским городам).txt", dec = ",")
+```
+
+В качестве группирующего признака выберем штат (*STATE*), а в качестве переменной-отклика процент афроамериканцев (*BLACK.*) в различных городах США 
+
+Проверим гипотезу о том, что в среднем процент афроамериканцев в различных штатах одинаков. Альтернативная гипотеза заключается в том, что найдется хотя бы один штат, среднее значение в котором отлично от остальных. 
+$$H_0: \mu_1 = \dots = \mu_r$$
+$$H_1:\mu_1 \neq \dots \neq \mu_r$$
+Определим сколько всего имеется групп и элементов в них:
+
+```{r}
+state_summary <- summary(data$STATE); sort(state_summary)
+```
+ 
+Для анализа выберем 3 наибольшие группы (т.к. число элементов в остальных группах слишком мало). Это Техас (TX), Огайо (OH) и Калифорния (CA). 
+ 
+```{r}
+california <- data[data$STATE == "CA" , c("STATE", "BLACK.")]
+texas <- data[data$STATE == "TX" , c("STATE", "BLACK.")]
+ohio <- data[data$STATE == "OH" , c("STATE", "BLACK.")]
+
+states <- rbind(california, ohio, texas)
+
+states <-  data.frame(STATE = as.character(states$STATE), BLACK. = states$BLACK.) # приходится создавать новый дата фрейм, чтобы количество уровней фактора STATE стало равно трем
+n <- length(states$STATE); n
+r <- length(unique(states$STATE)); r
+n_i <- tapply(X = states$BLACK., INDEX = states$STATE, FUN = length); n_i # число элементов в каждой группе
+
+
+```
+### 2. Модель одномерного однофакторного дисперсионного анализа с фиксированными эффектами
+$$x_{ij} = \mu + \alpha_i + \varepsilon_{ij}, \quad i \in 1:r, \: j \in 1:n_i $$
+Где ошибки $\varepsilon_{ij} \sim N(0,\sigma^2)$ и независимы, $\alpha_i$ -- главные эффекты, $\mu$ -- генеральное среднее. 
+Найдем оценки параметров $\mu$ и $\alpha_i$
+$$ \hat{\mu} = \bar{x}=\frac{1}{n}\sum_{i=1}^{r} \sum_{j=1}^{n_i} x_{ij} , \qquad \hat{\alpha_i} = \bar{x}_{i*} -\bar{x} = \frac{1}{n_i}\sum_{j=1}^{n_i} x_{ij} - \bar{x} $$
+```{r}
+x_mean <-  mean(states$BLACK.); x_mean
+xi_mean <- tapply(X = states$BLACK., INDEX = states$STATE, FUN = mean); xi_mean
+alpha <- xi_mean - x_mean; alpha
+```
+
+Далеее требуется удостовериться, что данные в каждой группе подчиняются нормальному закону распределения. Для этого, в рамках истинности нулевой гипотезы, построим гистограмму ошибок модели и проведем тест Шапиро-Уилка.
+```{r}
+california_eps <- california$BLACK. - xi_mean["CA"] 
+texas_eps <- texas$BLACK. - xi_mean["TX"]
+ohio_eps <- ohio$BLACK. - xi_mean["OH"] 
+errors <- c(california_eps, texas_eps, ohio_eps) 
+hist(errors)
+shapiro.test(errors)
+```
+
+P-значение теста Шапиро-Уилка достаточно мало. Следовательно, можно сказать, что данные в группах не имеют нормального распределения. 
+
+*Вопрос: Можем ли мы продолжать дисперсионный анализ?*
+
+### 3. Построение статистики критерия
+Рассчитаем общий источник вариации и разобьем его на сумму внутри и межгрупповой вариаций.
+$$ SST = Q = \sum_{i=1}^{r}\sum_{j=1}^{n_i}(x_{ij} - \bar{x})^2=\sum_{i=1}^{r}\sum_{j=1}^{n_i}(x_{ij} - \bar{x}_i + \bar{x}_i -\bar{x})^2 = SSB + SSW$$
+$$ SSB = Q_1 = \sum_{i=1}^{r} n_i(\bar{x}_i - \bar{x})^2, \quad SSW = Q_2 = \sum_{i=1}^{r}\sum_{j=1}^{n_i}(x_{ij} - \bar{x}_i)^2  $$
+```{r}
+SST <- (states$BLACK. - x_mean)%*%(states$BLACK. - x_mean); SST
+SSB <- n_i%*%alpha^2; SSB
+SSW <- SST - SSB; SSW # или аналогично SST <- errors%*%errors
+
+```
+Число степеней свободы $SST, SSB$ и $SSW$ $(Q, Q_1$ и $Q_2)$ равно $n-1, r-1$ и $n-r$ соответственно. 
+Построим статистику Фишера:
+$$F = \frac{SSB/(r-1)}{SSW/(n-r)}=\frac{Q_1/(r-1)}{Q_2/(n-r)} \sim F(r-1, n-r)$$
+
+```{r}
+
+F <- (SSB/(r-1))/(SSW/(n-r)); F
+
+```
+Осталось рассчитать p-value и сделать вывод.
+```{r}
+p_value <- 1-pf(F, r-1, n-r); p_value
+```
+При уровнях значимости $\alpha > p$ гипотеза отвергается. Если же $\alpha \ge p$, то нет основания отклонить гипотезу. 
+
+### 4. Проверка результатов 
+
+Воспользовавшись встроенной функцией aov(), убдеимся, что рассчеты верны
+
+```{r}
+a <- aov(BLACK.~STATE, states)
+summary(a)
+
+```

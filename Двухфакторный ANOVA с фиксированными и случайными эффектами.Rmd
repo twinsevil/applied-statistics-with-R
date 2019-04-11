@@ -1,0 +1,379 @@
+---
+title: "Дисперсионный анализ (ANOVA)"
+author: "Литвинцев И.С"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Одномерный двухфакторный дисперсионный анализ с фиксированными, случайными и смешанными эффектами
+
+### 1. Подготовка данных
+
+Исследуются данные о недоношенных младенцах, у которых вовремя не закрылся артериальный проток. 
+Выполним проверку значимости факторов  пола (Sex) и типа терапии (therapy) на зависимую переменную "масса при рождении" (Weight1) в случае модели с ни одним, одним и двумя случайными факторами.
+
+Факторы:
+
+1) Sex -	Пол (1-м, 2-д)
+2) therapy - Вид терапии (1  - только операция; 2 - мед.лечение + операция; 3 - только медикаментозное лечение (Педеа))
+
+Зависимая переменная:
+
+1) Weight1 -	Масса при рождении
+
+
+```{r data}
+data <- read.csv("C:/Users/806263/Desktop/SPbU/Магистратура Матмех (2017-2019)/Применение статистических методов к реальным данным/Данные/baseMA.csv", sep = ";", dec = ".")
+
+data <- data[, c("Sex", "therapy", "Weight1")]
+data <- na.omit(data)
+head(data)
+
+```
+
+Посчитаем количество элементов в каждой группе.
+
+```{r}
+num_elements <- tapply(X = data$Weight1, INDEX = list(data$Sex, data$therapy), FUN = length); num_elements
+```
+Видим, что число элементов в группах разное. Для дальнейшего анализа нам потребуется одинаковое количество наблюдений в каждой группе. Добьемся этого. 
+А также разобьем данные по группам основываясь на значениях двух факторов - Sex и therapy.
+
+```{r}
+K <- min(num_elements)
+split_data <- split(data, list(data$Sex, data$therapy))
+
+# Вспомогательная функция. Возвращает случайное подмножество df, состоящее из K элементов
+get_group <- function(df){
+  #ind <- sample(seq(1, nrow(df)), K) 
+  ind <- seq(1,K)
+  return(df[ind,])
+}
+
+groups <- lapply(split_data, get_group); 
+head(groups)
+
+```
+Полученные группы сведем в один data frame для того, чтобы в дальнейшем подать его на вход функции aov() для сверки результатов. 
+```{r}
+
+data <- rbind(groups$`1.1`, groups$`2.1`, groups$`1.2`, groups$`2.2`, groups$`1.3`, groups$`2.3`)
+```
+
+### 2. Модель одномерного двухфакторного дисперсионного анализа с фиксированными эффектами
+Данный вариант дисперсионного анализа применяется тогда, когда изучается влияние двух факторов на исследуемый признак. При этом можно выявить влияние отдельных факторов, а также влияние взаимодействия этих факторов. В результате вычисления данного варианта критерия получаются три эмпирических значения и, следовательно, три вывода.
+
+Модель имеет вид:
+
+$$x_{ijk} = \mu + \alpha_i + \beta_j + (\alpha \beta)_{ij} + \varepsilon_{ijk}, \quad i \in 1:I, \: j \in 1:J, \: k=1:K $$
+
+где ошибки $\varepsilon_{ij} \sim N(0,\sigma^2)$ и независимы, $\alpha_i$ -- фиксированный дифференциальный (главный) эффект фактора Sex, $\beta_j$ -- дифференциальный эффект фактора therapy, величина $(\alpha \beta)_{ij}$ -- эффект взаимодействия двух факторов; $\mu$ -- генеральное среднее. 
+
+Найдем оценки параметров по формулам:
+$$ \hat{\mu} = \bar{x}_{***} = \frac{1}{IJK}\sum_{i=1}^{I}\sum_{k=1}^{K} \sum_{j=1}^{J} x_{ijk}$$
+$$ \hat{\alpha_i} = \bar{x}_{i**} -\bar{x}_{***} = \frac{1}{JK}\sum_{j=1}^{J}\sum_{k=1}^{K} x_{ijk} - \bar{x}_{***} $$
+$$ \hat{\beta_j} = \bar{x}_{*j*} -\bar{x}_{***} = \frac{1}{IK}\sum_{i=1}^{I}\sum_{k=1}^{K} x_{ijk} - \bar{x}_{***} $$
+$$ \widehat{(\alpha\beta)}_{ij} = \bar{x}_{ij*} -\bar{x}_{i**}-\bar{x}_{*j*}+\bar{x}_{***} = \frac{1}{K}\sum_{k=1}^{K} x_{ijk} - \bar{x}_{i**}- \bar{x}_{*j*} +\bar{x}_{***} $$
+Рассчитаем $\bar{x}_{***}, \bar{x}_{i**}, \bar{x}_{*j*}, \bar{x}_{ij*}$:
+```{r}
+x_mean <- mean(data$Weight1); x_mean
+x_mean_i <- tapply(X = data$Weight1, INDEX = data$Sex, FUN = mean); x_mean_i
+x_mean_j <- tapply(X = data$Weight1, INDEX = data$therapy, FUN = mean); x_mean_j
+x_mean_ij <- tapply(X = data$Weight1, INDEX = list(data$Sex, data$therapy), FUN = mean); x_mean_ij
+```
+Теперь можно легко найти оценки:
+```{r}
+alpha <- x_mean_i - x_mean; alpha
+beta <- x_mean_j - x_mean; beta
+alpha_beta <- x_mean_ij - matrix(x_mean_i, 2, 3) - t(matrix(x_mean_j, 3, 2)) + x_mean; alpha_beta 
+
+```
+#### 2.1. Гипотеза об отсутствии эффекта фактора пола (Sex)
+$$H_0: \alpha_1 = ... = \alpha_I = 0$$
+$$H_1: \alpha_1 \neq ... \neq \alpha_I \neq 0$$
+Для проверки этой гипотезы используется статистика 
+$$F = \frac{MQ_{A}}{MQ_{R}} \sim F(df_{A}, df_R),$$
+
+где $Q_R$ -- остаточная сумма квадратов основной модели:
+$$Q_R = \sum_{i,j,k} ( x_{ijk} - \hat{\mu} - \hat{\alpha_i} - \hat{\beta_j} + \widehat{(\alpha \beta)}_{ij})^2 = \sum_{i,j,k} (x_{ijk} - \bar{x}_{ij*})^2, \quad MQ_R = \frac{Q_R}{df_R}, \quad df_R = IJ(K-1)$$
+Найдем чему равно $Q_R$.
+```{r}
+I <- length(unique(data$Sex)); J <- length(unique(data$therapy))
+ 
+# names(groups) = {"1.1" "2.1" "1.2" "2.2" "1.3" "2.3"}
+residuals <- c()
+for (name in names(groups)){
+  str_ij <- strsplit(name, "[.]")
+  ij <- as.vector(sapply(str_ij, as.numeric))
+  tmp_vec <- groups[[name]]$Weight1 - x_mean_ij[ij[1], ij[2]]
+  residuals <- append(residuals, tmp_vec)
+}
+Q_R <- residuals%*%residuals
+```
+
+Найдем $Q_A$ -- остаточную сумму квадратов усеченной по фактору пола модели:
+$$MQ_A = \frac{Q_A}{df_A}, \quad Q_A = \sum_{i,j,k}(\hat{\alpha}_i)^2 = JK \sum_i^I (\alpha_i)^2, \quad df_A = I-1,$$
+```{r}
+Q_A <- alpha%*%alpha*J*K; Q_A
+```
+
+В рамках истинности нулевой гипотезы $H_0: \alpha_1 = ... = \alpha_I = 0$ необходимо проверить, что данные в группах подчиняются нормальному закону распределения. Для этого построим гистограмму ошибок усеченной по полу модели и проведем тест Шапиро-Уилка. 
+Ошибки найдем по формуле:
+$$ \varepsilon_{ijk} = x_{ijk} - \hat{\mu} - \hat{\beta_j} - \widehat{(\alpha \beta)}_{ij} = x_{ijk} - \bar{x}_{ij*} + \bar{x}_{i**} - \bar{x}_{***}$$
+
+```{r}
+errors <- c()
+for (name in names(groups)){
+  str_ij <- strsplit(name, "[.]")
+  ij <- as.vector(sapply(str_ij, as.numeric))
+  tmp_vec <- groups[[name]]$Weight1 - x_mean_ij[ij[1], ij[2]] + x_mean_i[ij[1]]-x_mean
+  errors <- append(errors, tmp_vec)
+}
+hist(errors)
+shapiro.test(errors)
+
+```
+P-значение теста Шапиро-Уилка достаточно мало. Следовательно, можно сказать, что данные в группах не имеют нормального распределения и лучше воспользоваться непараметрическим аналогом критерия. 
+
+Несмотря на это, продолжим анализ. Посчитаем чему равна статистика $F = \frac{MQ_{A}}{MQ_{R}} \sim F(df_{A}, df_R)$ и p-значение распределения Фишера.
+
+```{r}
+df_R <- I*J*K-I*J
+df_A <- I-1
+MQ_A <- Q_A/df_A
+MQ_R <- Q_R/df_R
+f_A <- MQ_A/MQ_R; f_A
+p_A <- 1-pf(f_A, df_A, df_R); p_A
+```
+При уровне значимости $\alpha = 0.05$ нет оснований отклонить гипотезу. Следовательно, нет значимого влияния фактора пола на исследуемую переменную веса. 
+
+#### 2.2. Гипотеза об отсутствии эффекта фактора вид терапии (therapy)
+$$H_0: \beta_1 = ... = \beta_J = 0$$
+$$H_1: \beta_1 \neq ... \neq \beta_J \neq 0$$
+Для проверки этой гипотезы используется статистика 
+$$F = \frac{MQ_{B}}{MQ_{R}} \sim F(df_{B}, df_R),$$
+где $Q_B$ -- остаточная сумма квадратов усеченной по фактору терапии модели:
+$$MQ_B = \frac{Q_B}{df_B}, \quad Q_B = \sum_{i,j,k}(\hat{\beta}_j)^2 = IK \sum_j^J (\hat{\beta}_j)^2, \quad df_B = J-1,$$
+Проверим, что данные в группах подчиняются нормальному закону распределения. Для этого построим гистограмму ошибок усеченной модели и проведем тест Шапиро-Уилка. 
+
+$$ \varepsilon_{ijk} = x_{ijk} - \hat{\mu} - \hat{\alpha}_i - \widehat{(\alpha \beta)}_{ij} = x_{ijk} - \bar{x}_{ij*} + \bar{x}_{*j*} - \bar{x}_{***}$$
+```{r}
+errors <- c()
+for (name in names(groups)){
+  str_ij <- strsplit(name, "[.]")
+  ij <- as.vector(sapply(str_ij, as.numeric))
+  tmp_vec <- groups[[name]]$Weight1 - x_mean_ij[ij[1], ij[2]] + x_mean_j[ij[2]]-x_mean
+  errors <- append(errors, tmp_vec)
+}
+hist(errors)
+shapiro.test(errors)
+
+```
+Опять получили не нормальное распределение ошибок, но продолжим.
+
+Посчитаем чему равна статистика $F = \frac{MQ_{B}}{MQ_{R}} \sim F(df_{B}, df_R)$ и p-значение распределения Фишера.
+```{r}
+Q_B <- I*K*beta%*%beta; Q_B
+df_B <- J-1
+MQ_B <- Q_B/df_B
+f_B <- MQ_B/MQ_R; f_B
+p_B <- 1-pf(f_B, df_B, df_R); p_B
+```
+При уровне значимости $\alpha = 0.05$ отклоняем гипотезу. Т.е. влияние фактора вид терапии значимо для веса. 
+
+#### 2.3. Гипотеза об отсутствии эффекта взаимодействия двух факторов (Sex:therapy)
+
+$$H_0: (\alpha\beta)_{11} = ... = (\alpha\beta)_{IJ} = 0$$
+$$H_1: (\alpha\beta)_{11} \neq ... \neq (\alpha\beta)_{IJ} \neq 0$$
+Для проверки этой гипотезы используется статистика 
+$$F = \frac{MQ_{AB}}{MQ_{R}} \sim F(df_{AB}, df_R),$$
+где $Q_{AB}$ -- остаточная сумма квадратов модели, усеченной по взаимодействующим факторам:
+$$MQ_{AB} = \frac{Q_{AB}}{df_{AB}}, \quad Q_{AB} = \sum_{i,j,k}((\widehat{\alpha\beta)}_{ij})^2 = K \sum_j^J\sum_i^I ( (\widehat{\alpha\beta)}_{ij})^2, \quad df_{AB} = (I-1)(J-1),$$
+Проверим, что данные в группах подчиняются нормальному закону распределения. Для этого построим гистограмму ошибок усеченной модели и проведем тест Шапиро-Уилка. 
+
+$$ \varepsilon_{ijk} = x_{ijk} - \hat{\mu} - \hat{\alpha}_i - \hat{\beta}_j = x_{ijk} - \bar{x}_{i**} - \bar{x}_{*j*} + \bar{x}_{***}$$
+```{r}
+errors <- c()
+for (name in names(groups)){
+  str_ij <- strsplit(name, "[.]")
+  ij <- as.vector(sapply(str_ij, as.numeric))
+  tmp_vec <- groups[[name]]$Weight1 - x_mean_i[ij[1]] - x_mean_j[ij[2]]  + x_mean
+  errors <- append(errors, tmp_vec)
+}
+hist(errors)
+shapiro.test(errors)
+```
+Такая же не нормальная ситуация. Продолжаем.
+(Вообще, при объемах групп больше 30, ANOVA становится менее требовательным к нормальности данных и гомогенности дисперсий)
+
+Посчитаем чему равна статистика $F = \frac{MQ_{AB}}{MQ_{R}} \sim F(df_{AB}, df_R)$ и p-значение распределения Фишера.
+```{r}
+df_AB <- (I-1)*(J-1)
+Q_AB <- K*(alpha_beta[1,]%*%alpha_beta[1,] + alpha_beta[2,]%*%alpha_beta[2,]); Q_AB
+MQ_AB <- Q_AB/df_AB
+f_AB <- (MQ_AB/MQ_R); f_AB
+p_AB <- 1 - pf(f_AB, df_AB, df_R); p_AB
+```
+p-значение больше уровня значимости $\alpha = 0.05$, следовательно влияние фактора взаимодействия незначимо.
+
+
+### 3. Модель одномерного двухфакторного дисперсионного анализа со случайными эффектами
+
+Отличие модели со случайными эффектами от модели с фиксированными эффектами в том, что в случае модели с фиксированными эффектами при повторении эксперимента будут рассматриваться выборки из одних и тех же подпопуляций. Если же задана модель со случайными эффектами, то при повторении эксперимента мы скореем всего будем иметь дело со случайными выборками из других подпопуляций.
+
+Модель со случайными эффектами имеет вид: 
+$$x_{ijk} = \mu + \alpha_i + \beta_j + (\alpha \beta)_{ij} + \varepsilon_{ijk}, \quad i \in 1:I, \: j \in 1:J, \: k=1:K, $$
+где  $\mu$ -- генеральное среднее; случайные дифференциальные эффекты А-фактора $\alpha_i \sim N(0; \sigma_a)$ и независимы; случайные дифференциальные эффекты B-фактора $\beta_j \sim N(0; \sigma_b)$ и независимы, эффекты взаимодействия $(\alpha\beta)_{ij} \sim N(0; \sigma_{ab})$ и независимы. Величины $\varepsilon_{ijk} \sim N(0; \sigma)$ независимы. Все величины $\alpha_i$, $\beta_j$, $(\alpha\beta)_{ij}$, $\varepsilon_{ijk}$ независимы в совокупности.
+
+#### 3.1. Гипотеза об отсутствии эффекта фактора пола (Sex)
+
+В случае случайного фактора гипотеза об отсутствии значимости эффекта пола имеет вид:
+$$H_0: \sigma^2_a = 0 \qquad\qquad\qquad H_1: \sigma^2_a \neq 0$$
+
+Для проверки этой гипотезы используется статистика 
+$$F = \frac{MQ_{A}}{MQ_{AB}} \sim F(df_{A}, df_{AB}),$$
+Т.к. величины средних квадратов $MQ_{A}$ и $MQ_{AB}$ уже найдены, легко найдем значение статистики
+```{r}
+f_A2 <- MQ_A/MQ_AB; f_A2
+p_A2 <- 1-pf(f_A2, df_A, df_AB); p_A2
+```
+Так же, как и в случае модели с фиксированными эффектами, получили незначимсоть фактора пола.
+
+#### 3.2. Гипотеза об отсутствии эффекта фактора терапии (therapy)
+
+В случае случайного фактора гипотеза об отсутствии значимости эффекта пола имеет вид:
+$$H_0: \sigma^2_b = 0 \qquad\qquad\qquad H_1: \sigma^2_b \neq 0 $$
+Для проверки этой гипотезы используется статистика 
+$$F = \frac{MQ_{B}}{MQ_{AB}} \sim F(df_{B}, df_{AB}),$$
+```{r}
+f_B2 <- MQ_B/MQ_AB;
+p_B2 <- 1-pf(f_B2, df_B, df_AB); p_B2
+```
+В отличие от модели с фиксированными эффекатми, здесь получили незначимость фактора вид терапии. 
+
+#### 3.3  Гипотеза об отсутствии эффекта взимодействия факторов пола и терапии (Sex:therapy)
+
+В случае случайного фактора гипотеза об отсутствии значимости эффекта пола имеет вид:
+$$H_0: \sigma^2_{ab} = 0 \qquad\qquad\qquad H_1: \sigma^2_{ab} \neq 0$$
+
+Для проверки этой гипотезы используется такая же статистика, как в случае фиксированных эффектов
+$$F = \frac{MQ_{AB}}{MQ_{R}} \sim F(df_{AB}, df_{R}),$$
+
+```{r}
+f_AB2 <- MQ_AB/MQ_R
+p_AB2 <- 1-pf(f_AB2, df_AB, df_R); p_AB2
+```
+Как и ожидалось, получили незначимость эффекта взаимодействия факторов.
+
+### 4. Модель одномерного двухфакторного дисперсионного анализа со смешанными эффектами
+
+Модель со смешанными эффектами имеет вид: 
+$$x_{ijk} = \mu + \alpha_i + \beta_j + (\alpha \beta)_{ij} + \varepsilon_{ijk}, \quad i \in 1:I, \: j \in 1:J, \: k=1:K, $$
+где  $\mu$ -- генеральное среднее; $\alpha_i$ -- i-ый дифференциальный эффект А-фактора;$\beta_j \sim N(0; \sigma_b)$ независимые случайные эффекты B-фактора; $(\alpha\beta)_{ij} \sim N(0; \sigma_{ab})$ независимые эффекты взаимодействия. Величины $\varepsilon_{ijk} \sim N(0; \sigma)$ независимы. Все величины $\beta_j$, $(\alpha\beta)_{ij}$, $\varepsilon_{ijk}$ независимы в совокупности.
+
+Для проверки гипотезы $H_0: \alpha_1 = ... = \alpha_I = 0$ используется отношение $F = \frac{MQ_A}{MQ_{AB}}$, для $H_0: \sigma_{b}^2 = 0$ отношение $F = \frac{MQ_B}{MQ_{AB}}$, для $H_0: \sigma_{ab}^2 = 0$ отношение $F = \frac{MQ_{AB}}{MQ_{R}}$ с соответсвующими степенями свободы. Т.е. статистики для проверки гипотез точно такие, как и в случае модели с двумя случайными эффектами. 
+
+Заметим, что в случае двухфакторного плана результаты дисперсионного анализа в случае хотя бы одного случайного фактора совпадают.
+
+
+### 5. Проверка результатов 
+
+Воспользовавшись встроенной функцией aov(), убедимся, что рассчеты верны. Но не забудем преобразовать тип переменных Sex и therapy в факторы, иначе результат будет не корректным.
+```{r}
+data$Sex <- factor(data$Sex); data$therapy <- factor(data$therapy)
+aov <- aov(Weight1~Sex + therapy + Sex*therapy, data) # hist(residuals(aov))
+summary(aov) # Sex/therapy == Sex+therapy:Sex
+```
+Для удобства проверки ниже приведены получившиеся p-значения
+```{r}
+p <- c(p_A, p_B, p_AB); names(p) <- c("Sex", "therapy", "Sex:therapy" ); p
+p2 <- c(p_A2, p_B2, p_AB2); names(p2) <- c("Sex2", "therapy2", "Sex2:therapy2" ); p2
+```
+**Вывод:** в случае модели с фиксированными эффектами на исследуемый признак значимое влияние оказал только вид терапии. Пол и эффект взаимодействия пола и терапии значимого влияния не оказывают. 
+
+В случае модели со случайными и смешанными эффектами ни фактор пола, ни фактор вида терапии, ни их взаимодействие не оказали значимого влияния.
+
+**Вопрос:**
+Пытаясь осознать разницу между случайными и фиксированными эффектами, я нашел следующий пример ([ссылка на источник](http://www.statpower.net/Content/311/Lecture%20Notes/RandomEffects.pdf)):
+
+Предположим мы исследуем содержание натрия среди пивной продукции различных брендов. Существуют сотни различных брендов пива, но у нас есть возможность протестировать только 8 из них. Мы выбираем случайным образом 8 брендов и тестируем по 6 бутылок пива  каждого бренда.
+
+При составлении модели нужно понимать разницу между 2-мя моделями:
+
+1) Если бы мы были заинтересованы только в обобщении до 8 брендов в исследовании, мы могли бы рассматривать эффект каждого бренда как фиксированную константу.
+
+2) Но если мы, произвольно отбирая несколько брендов из популяции большого размера, хотим обобщить результаты на всю популяцию (на все бренды пива), мы должны рассмотреть модель со случайными эффектами. 
+
+А корректно ли в случае таких факторов, как пол и вид терапии, пользоваться моделью со случайными эффектами? Ведь ни пол, ни вид терапии не подразумевает иного (большего) количества уровней, а значит эффекты должны быть фиксированными.
+
+
+### 6. График средних значений и 95% довертильного интервала каждой группы 
+
+Построим [Interaction plot](http://www.cookbook-r.com/Graphs/Plotting_means_and_error_bars_(ggplot2)/)
+
+
+
+```{r}
+interaction.plot(data$therapy, data$Sex,  data$Weight1, col = c("red", "blue"))
+```
+
+
+То же самое, но с 95% доверительными интервалами.
+```{r}
+library(ggplot2)
+
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+    library(plyr)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # This does the summary. For each group's data frame, return a vector with
+    # N, mean, and sd
+    datac <- ddply(data, groupvars, .drop=.drop,
+      .fun = function(xx, col) {
+        c(N    = length2(xx[[col]], na.rm=na.rm),
+          mean = mean   (xx[[col]], na.rm=na.rm),
+          sd   = sd     (xx[[col]], na.rm=na.rm)
+        )
+      },
+      measurevar
+    )
+
+    # Rename the "mean" column    
+    datac <- rename(datac, c("mean" = measurevar))
+
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+
+    return(datac)
+}
+
+data_stats <- summarySE(data, measurevar="Weight1", groupvars=c("Sex","therapy"))
+pd <- position_dodge(0.1) # move them .05 to the left and right
+
+ggplot(data_stats, aes(x=therapy, y=Weight1, colour=Sex)) + geom_errorbar(aes(ymin=Weight1-ci, ymax=Weight1+ci), width=.1, position=pd) + geom_point(position=pd)+ geom_line(position=pd, aes(group=Sex)) 
+```
+
+
+
+### 7. Критерий Тьюки
+
+```{r}
+
+fwcl <- TukeyHSD(aov)
+plot(fwcl)
+
+```

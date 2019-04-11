@@ -1,0 +1,142 @@
+---
+title: "Факторный анализ"
+author: "Литвинцев И.С"
+date: '12 декабря 2017 г '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Факторный анализ
+Исследуются данные о недоношенных младенцах, у которых вовремя не закрылся артериальный проток. Требуется по независимым переменным сделать факторный анализ и проверить, указывают ли факторы на дифференциацию по терапии и осложнениям.
+
+Независимые признаки:
+
+1)	O2.1	Насыщение крови кислородом до
+2)	O2.2 	Насыщение крови кислородом после
+3)	Diuresis1	Диурез до
+4)	Diuresis.2	Диурез после
+5)	PA1	Артериальное давление до
+6)	PA2	Артериальное давление после
+7)	Р.Р.1	Пульсовое давление до
+8)	PP2	Пульсовое давление после
+
+Факторные переменные:
+
+1) therapy - вид терапии
+2) BLD - 	бронхо лёгочная дисплазия
+
+### 1. Подготовка данных
+```{r baseMA}
+file <- "C:/Users/806263/Desktop/SPbU/Магистратура Матмех (2017-2019)/Применение статистических методов к реальным данным/Данные/baseMA.csv";
+df <- read.csv(file, sep = ";", dec = ".")
+
+features <- c("O2.1", "O2.2", "Diuresis1", "Diuresis.2", "PA1", "PA2", "Р.Р.1", "PP2")
+classes <- c("BLD", "therapy")
+X <- subset(df, select = features) 
+Y <- subset(df, select = classes) 
+df <- cbind(X, Y)
+
+df <- na.omit(df)
+head(df)
+```
+
+Для начала стандартизуем данные.
+```{r}
+X <- scale(df[ , features])
+Y <- df[ , classes]
+df <- cbind(X, Y)
+n <- nrow(df)
+```
+
+### 2. Поиск главных компонент и факторов
+
+Для начала необходимо найти собственные векторы матрицы $\mathrm{S}$:
+$$\mathrm{S} = \mathrm{X}^T\mathrm{X}, \qquad \mathrm{S}U_i=\lambda_iU_i, \qquad (U_i, U_j)=0, \quad  \forall i \neq j, \qquad \mathrm{U}=[U_1: \ldots : U_d],$$
+где $d \le rank(\mathrm{S})$.
+```{r}
+S <- t(X)%*%X
+S.eig <- eigen(S); 
+#install.packages('xtable')
+#library("xtable")
+
+U <- S.eig$vectors; U
+lambda <- S.eig$values; lambda
+```
+
+Теперь можно найти векторы главных компонент $\mathrm{Z} = [Z_1 : \ldots : Z_d]$.
+
+$$\mathrm{Z} = \mathrm{X}\mathrm{U}.$$
+```{r}
+Z <- X%*%U; 
+head(Z)
+```
+А также найдем факторы $V_i$ с помощью следующей формулы:
+$$V_i = \frac{Z_i}{\sqrt{\lambda_i}}.$$
+```{r}
+V <- X%*%U/sqrt(lambda)
+head(V)
+V <- Z/sqrt(lambda)
+head(V)
+```
+
+И, наконец, найдем факторные нагрузки $F_i$:
+$$F_i = \sqrt{\lambda_i}U_i, \qquad \mathrm{F}=[F_1:\ldots:F_d], \qquad (F_i)_j = cor(X_i, Z_j).$$
+```{r}
+F.loadings <- sqrt(lambda)*U; F.loadings
+```
+
+### 3. Проверка результатов
+Воспользуемся функцией prcomp() для проверки результатов.
+```{r}
+pca.fit <- prcomp(X)
+pca.fit$rotation
+```
+Видим, что компонента "rotation" содержит в себе собственные векторы $U_i$ матрицы $\mathrm{S}$.
+```{r}
+head(pca.fit$x)
+```
+Компонента "x" содержит главные компоненты $Z_i$. 
+
+А также вызов summary показывает вклад главных компонент в общую дисперсию.
+```{r}
+summary(pca.fit)
+
+lambda/sum(lambda)
+```
+Следует отметить, что общий вклад первых двух главных компонент небольшой -- всего 39% от общей дисперсии. А значит двух компонент на самом деле недостаточно, чтобы описать наши признаки. Построив scree plot также видим, что он не имеет ярко выраженных "крутых спусков".
+
+```{r}
+plot(pca.fit)
+#print(pca.fit)
+```
+Построим scatter plot по первым двум главным компонентам.
+```{r}
+plot(Z[,1], Z[,2],  xlab="PC1", ylab="PC2", pch=1)
+```
+
+Картина ожидаемая, т.к. вклад PC1 примерно равен вкладу PC2.
+
+```{r}
+pca.fit <- prcomp(X, rank.=2)
+summary(pca.fit)
+biplot(pca.fit)
+```
+
+Чтобы ответить на вопрос о дифференциации факторов по признакам therapy и BLD проведем многомерный дисперсионный анализ.
+
+```{r aov}
+df$BLD <- as.factor(df$BLD)
+df$therapy <- as.factor(df$therapy)
+
+aov.fit <- aov(V[,1] ~ BLD + therapy + BLD:therapy, df)
+summary(aov.fit)
+
+aov.fit <- aov(V[,2] ~ BLD + therapy + BLD:therapy, df)
+summary(aov.fit)
+
+aov.fit <- manova(V[,1:2] ~ BLD + therapy + BLD:therapy, df)
+summary(aov.fit)
+```
+Видим, что влияние факторов therapy и BLD значимы, а их взаимодействие нет. 

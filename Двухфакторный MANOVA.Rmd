@@ -1,0 +1,553 @@
+---
+title: "Многомерный дисперсионный анализ (MANOVA)"
+author: "Литвинцев И.С"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Двумерный двухфакторный дисперсионный анализ с фиксированными эффектами
+
+### 1. Подготовка данных
+
+Исследуются данные о недоношенных младенцах, у которых вовремя не закрылся артериальный проток. 
+
+Факторы:
+
+1) Sex -	Пол (1-м, 2-д)
+2) therapy - Вид терапии (1  - только операция; 2 - мед.лечение + операция; 3 - только медикаментозное лечение (Педеа))
+
+Зависимые переменные:
+
+1) Weight1 -	Масса при рождении
+2) G.age - Гестационный возраст
+
+```{r data}
+data <- read.csv("C:/Users/806263/Desktop/SPbU/Магистратура Матмех (2017-2019)/Применение статистических методов к реальным данным/Данные/baseMA.csv", sep = ";", dec = ".")
+
+data <- data[, c("Sex", "therapy", "Weight1", "G.age" )]
+
+data <- na.omit(data)
+head(data)
+data$Sex <- factor(data$Sex)
+data$therapy <- factor(data$therapy)
+```
+
+Посчитаем количество элементов в каждой группе.
+
+```{r}
+num_elements <- tapply(X = data$Weight1, INDEX = list(data$Sex, data$therapy), FUN = length); num_elements
+```
+
+Видим, что число элементов в группах разное. Для дальнейшего анализа нам потребуется одинаковое количество наблюдений в каждой группе. Добьемся этого. 
+А также разобьем данные по группам основываясь на значениях двух факторов - Sex и therapy.
+
+```{r}
+K <- min(num_elements)
+split_data <- split(data, list(data$Sex, data$therapy))
+
+# Вспомогательная функция. Возвращает случайное подмножество df, состоящее из K элементов
+get_group <- function(df){
+  #ind <- sample(seq(1, nrow(df)), K) 
+  ind <- seq(1,K)
+  return(df[ind,])
+}
+
+groups <- lapply(split_data, get_group); 
+```
+
+Полученные группы сведем в один data frame для того, чтобы в дальнейшем подать его на вход функции manova() для сверки результатов. 
+```{r}
+data <- rbind(groups$`1.1`, groups$`2.1`, groups$`1.2`, groups$`2.2`, groups$`1.3`, groups$`2.3`)
+```
+
+### 2. Модель двумерного двухфакторного дисперсионного анализа с фиксированными эффектами
+
+#### Матричная запись в общем виде
+Пусть вектор $Y_s = (y_{s1}, \ldots, y_{sn})^T$ соответствует $n$ независимым измерениям $s$-ой переменной $s \in 1:p$. Для каждого $Y_s$ рассмотрим одномерную линейную модель в матричном виде:
+$$Y_s = X \beta_s + e_i, \qquad cov(Y_s) = \sigma_{ss}I, \quad cov(Y_s, Y_t)= \sigma_{st}I$$
+где $X$ -- матрица плана ранга $r \le m < n$, $\beta_s = (\beta_{s1}, \ldots, \beta_{sm})$ -- вектор параметров, специфичных для каждой переменной. Взятые вместе $p$ одномерных моделей составляют многомерную обобщенную линейную модель:
+$$ Y = X \beta + e,$$
+где
+
+$$Y = \begin{pmatrix}
+y_{11} & y_{21} & \ldots & y_{p1}  \\
+y_{12} & y_{22} & \ldots & y_{p2}  \\
+\vdots & \vdots & \vdots & \vdots & \\
+y_{1n} & y_{2n} & \ldots & y_{pn} \\
+\end{pmatrix}, \quad
+
+\beta = \begin{pmatrix}
+\beta_{11} & \beta_{21} & \ldots & \beta_{p1}  \\
+\beta_{12} & \beta_{22} & \ldots & \beta_{p2}  \\
+\vdots & \vdots & \vdots & \vdots & \\
+\beta_{1m} & \beta_{2m} & \ldots & \beta_{pm} \\
+\end{pmatrix}, \quad
+
+e = \begin{pmatrix} 
+\varepsilon_{11} & \varepsilon_{21} & \ldots & \varepsilon_{p1}  \\
+\varepsilon_{12} & \varepsilon_{22} & \ldots & \varepsilon_{p2}  \\
+\vdots & \vdots & \vdots & \vdots & \\
+\varepsilon_{1n} & \varepsilon_{2n} & \ldots & \varepsilon_{pn} \\
+\end{pmatrix}$$
+
+и строки матрицы $e$ составляют случайную выборку из $N(0, \Sigma)$
+
+#### Покомпонентная запись 
+
+Модель двумерного двухфакторного дисперсионного анализа с фиксированными эффектами имеет вид: 
+$$x_{ijk}^{(1)} = \mu^{(1)} + \alpha_i^{(1)} + \beta_j^{(1)} + (\alpha \beta)_{ij}^{(1)} + \varepsilon_{ijk}^{(1)}, \quad i \in 1:I, \: j \in 1:J, \: k \in 1:K,$$
+
+$$x_{ijk}^{(2)} = \mu^{(2)} + \alpha_i^{(2)} + \beta_j^{(2)} + (\alpha \beta)_{ij}^{(2)} + \varepsilon_{ijk}^{(2)}, \quad i \in 1:I, \: j \in 1:J, \: k \in 1:K,$$
+где ошибки $\varepsilon_{ijk}^{(s)} \sim N(0,\sigma_s^2)$ независимы и их ковариация $cov(\varepsilon_{ijk}^{(1)},\varepsilon_{ijk}^{(2)}) = \sigma^2_{12}$;
+
+$\alpha_i^{(s)}$ -- главный фиксированный эффект фактора Sex;
+
+$\beta_j^{(s)}$ -- главный фиксированный эффект фактора therapy;
+
+$(\alpha \beta)_{ij}^{(s)}$ -- эффект взаимодействия двух факторов; 
+
+$\mu^{(s)}$ -- генеральное среднее. При $s \in 1:2$ и ограничениях на параметры:
+$$\sum_{i=1}^I \alpha_i=0, \quad  \sum_{j=1}^J \beta_j=0, \quad \sum_{i=1}^I (\alpha \beta)_{ij}=0, \; j\in 1:J, \quad \sum_{j=1}^J (\alpha \beta)_{ij}=0, \; i\in 1:I$$
+
+Найдем $I, J$ и $n=IJK$ ($K=10$ нашли ранее):
+```{r}
+I <- length(unique(data$Sex))
+J <- length(unique(data$therapy))
+n <- I*J*K
+```
+Матрица $Y$ состоит из двух столбцов, отвечающих зависимым переменным вес и гестационный возраст:
+```{r}
+Y <- cbind(data$Weight1, data$G.age)
+```
+
+Матрица плана имеет вид:
+
+$$
+X = \begin{pmatrix}
+& \mu \quad & \alpha_1 \quad & \beta_1 \quad & \beta_2 \quad & \alpha\beta_{(11)} & \alpha\beta_{(12)} \\
+x_{111}  & 1 & 1 & 1 & 0 & 1 & 0 \\
+\vdots  & \vdots & \vdots  & \vdots & \vdots  & \vdots & \vdots \\
+x_{11K} & 1 & 1 & 1 & 0 & 1 & 0 \\
+
+x_{121} & 1 & 1 & 0 & 1 & 0 & 1 \\
+\vdots  & \vdots & \vdots  & \vdots & \vdots  & \vdots & \vdots \\
+x_{12K} & 1 & 1 & 0 & 1 & 0 & 1 \\
+
+x_{131} & 1 & 1 & -1 & -1 & -1 & -1 \\
+\vdots  & \vdots & \vdots  & \vdots & \vdots  & \vdots & \vdots \\
+x_{13K} & 1 & 1 & -1 & -1 & -1 & -1 \\
+
+x_{211} & 1 & -1 & 1 & 0 & -1 & -1 \\
+\vdots  & \vdots & \vdots  & \vdots & \vdots  & \vdots & \vdots \\
+x_{21K} & 1 & -1 & 1 & 0 & -1 & -1 \\
+
+x_{221} & 1 & -1 & 0 & 1 & 0 & -1 \\
+\vdots  & \vdots & \vdots  & \vdots & \vdots  & \vdots & \vdots \\
+x_{22K} & 1 & -1 & 0 & 1 & 0 & -1 \\
+
+x_{231} & 1 & -1 & -1 & -1 & -1 & -1 \\
+\vdots  & \vdots & \vdots  & \vdots & \vdots  & \vdots & \vdots \\
+x_{23K} & 1 & -1 & -1 & -1 & -1 & -1 \\
+\end{pmatrix}
+$$
+
+Сформируем матрицу плана.
+
+```{r}
+Y1 <- data$Weight1; Y2 <- data$G.age;
+
+X <- matrix(data=0, nrow = n, ncol = I*J, dimnames = list(c(), c("mu", "alpha1", "beta1", "beta2", "alphabeta11", "alphabeta12")))
+
+rows.indexes <- list()
+for(i in 1:(I*J)){
+    rows.indexes[[i]] <- seq(K*(i-1)+1,(K*i),1)
+}
+
+X[ ,1] <- 1
+
+X[unlist(rows.indexes[1:3]), 2] <- 1
+X[unlist(rows.indexes[4:6]), 2] <- -1
+X[rows.indexes[[1]], c(3,5)] <- 1
+X[rows.indexes[[2]], c(4,6)] <- 1
+X[rows.indexes[[3]], c(3,4,5,6)] <- -1
+X[rows.indexes[[4]], c(3)] <- 1
+X[rows.indexes[[4]], c(5)] <- -1
+X[rows.indexes[[5]], c(4)] <- 1
+X[rows.indexes[[5]], c(6)] <- -1
+X[rows.indexes[[6]], c(3,4,5,6)] <- -1
+
+```
+Столбцы матрицы $\beta$ имеют вид $\beta_s = (\mu^{(s)}, \alpha_1^{(s)}, \beta_1^{(s)}, \beta_2^{(s)}, \alpha\beta_{11}^{(s)}, \alpha\beta_{12}^{(s)})^T$ при $s \in 1:2$. 
+
+Оценка параметров $\beta_s$ находится по формуле:
+$$\hat{\beta}_s = (X^TX)^-X^TY_s \qquad s\in 1:p$$
+```{r}
+beta1 <- solve(t(X)%*%X) %*% t(X) %*% Y1; beta1
+beta2 <- solve(t(X)%*%X)%*%t(X)%*%Y2; beta2
+```
+Для вычисления несмещенных оценок дисперсий используется остаточная сумма произведений:
+$$R_0^2(s,t) = Y_s^TY_t - Y_s^TX \hat{\beta}_t = (Y_s - X \hat{\beta_s})^T(Y_t - X \hat{\beta_t}), \qquad \sigma_{st} = \frac{R_0^2(s,t)}{n-r}$$
+и 
+$$\hat{\beta}_s = \big(\hat{\mu}^{(s)},\hat{\alpha_1}^{(s)},\hat{\beta_1}^{(s)},\hat{\beta_2}^{(s)},\widehat{(\alpha\beta)}_{11}^{(s)},\widehat{(\alpha\beta)}_{12}^{(s)} \big)$$
+
+Найдем матрицу $\mathrm{R_0} = \{R_0^2(s,t)\}$
+```{r}
+R0 <- matrix(data = 0, 2,2); 
+R0[1,1] <- t(Y1 - X%*%beta1)%*%(Y1 - X%*%beta1)
+R0[1,2] <- t(Y1 - X%*%beta1)%*%(Y2 - X%*%beta2)
+R0[2,1] <- t(Y2 - X%*%beta2)%*%(Y1 - X%*%beta1)
+R0[2,2] <- t(Y2 - X%*%beta2)%*%(Y2 - X%*%beta2)
+R0
+```
+
+#### 2.1. Гипотеза об отсутствии эффекта фактора пола (Sex)
+В матричном виде гипотеза выглядит как одновременная проверка:
+$$H^T \beta_s = \theta_s =  0, \quad H = (0, 1, 0, 0, 0, 0), \qquad s\in 1:2$$
+В покомпонтеном виде имеем
+$$H_0: \alpha_1^{(s)} = \alpha_2^{(s)} = 0, \quad s\in1:2$$
+В рамках истинности нулевой гипотезы построим матрицу $\mathrm{R_1}$
+$$R_1^2(s,t) = Y_s^TY_t - Y_s^TX \hat{\beta}^*_t = (Y_s - X \hat{\beta_s^*})^T(Y_t - X \hat{\beta_t^*}),$$
+где $\hat{\beta}^*_t$ -- оценка параметров модели при выполненной $H_0$, т.е. в данном случае $\hat{\beta}^*_s = (\bar{x}^{(s)}, 0, \beta_1^{(s)}, \beta_2^{(s)}, \widehat{(\alpha\beta)}_{11}^{(s)}, \widehat{(\alpha\beta)}_{12}^{(s)})$. 
+Сначада найдем $\hat{\beta}^*_s$ 
+
+```{r}
+# 1 вариант
+beta10 <- beta1; beta10[2] <- 0; beta10
+beta20 <- beta2; beta20[2] <- 0; beta20
+
+# 2 вариант
+#tempX <- X;
+#X <- X[,-2]
+#beta10 <- solve(t(X)%*%X)%*%t(X)%*%data$Weight1; beta10
+#beta20 <- solve(t(X)%*%X)%*%t(X)%*%data$G.age; beta20
+```
+Теперь найдем $\mathrm{R_1}$.
+```{r}
+R1 <- matrix(c(0,0,0,0), 2,2); 
+R1[1,1] <- t(Y1 - X%*%beta10)%*%(Y1 - X%*%beta10)
+R1[1,2] <- t(Y1 - X%*%beta10)%*%(Y2 - X%*%beta20)
+R1[2,1] <- t(Y2 - X%*%beta20)%*%(Y1 - X%*%beta10)
+R1[2,2] <- t(Y2 - X%*%beta20)%*%(Y2 - X%*%beta20)
+#X <- tempX;
+R1
+RM.A <- R1 - R0; RM.A
+
+```
+Получили, что матрица  $\mathrm{R_0}$ подсчитана верно, т.к. сопадает с результатом работы встроенной функции. А матрица  $\mathrm{R_1}$ подсчитана неверно. В связи с этим **вопрос #1**:
+
+> Похоже я неправильно понимаю, как искать оценку параметров модели при выполненной $H_0$, т.е. что такое $\hat{\beta}^*_t$ -- оценка параметров модели при выполненной $H_0$. 
+Я думал слова "при выполненной $H_0$" означают, что нужно просто занулить соответствующие компоненты вектора $\hat{\beta}_t$. Например, в случае гипотезы
+$$ H_0: \alpha_{1}^{(s)} = 0$$
+получим
+$$\hat{\beta}^*_s = (\bar{x}^{(s)}, \: 0, \: \beta_1^{(s)}, \: \beta_2^{(s)}, \: \widehat{(\alpha\beta)}_{11}^{(s)}, \: \widehat{(\alpha\beta)}_{12}^{(s)})^T$$ 
+Как должно быть на самом деле?
+
+Сведем многомерную задачу к одномерному случаю, рассмотрев $\beta = L_1 \beta_1 +\ldots + L_p \beta_p$, $\theta =  L_1 \theta_1 +\ldots + L_p \theta_p$ и $Y = L_1 Y_1 +\ldots + L_p Y_p$. Подходящий критерий основывается на двух минимальных суммах квадратов:
+$$ R_0^2 = \min_{L} (Y - X\beta)^T(Y - X\beta), \qquad  R_1^2 = \min_{L: \:H^T\beta = \theta} (Y - X\beta)^T(Y - X\beta)$$
+Легко убедиться что
+$$R_0^2 = L^T\mathrm{R_0}L, \qquad R_1^2 = L^T\mathrm{R_1}L$$
+При нулевой гипотезе $H^T\beta=\theta$ статистики $R_1^2 - R_0^2$ и $R_0^2$ распределены независимо как центральные хи-квадрат распределения $\sigma^2_L \chi^2(s)$ и $\sigma^2_L \chi^2(n-r)$, где $s = rank(H), r = rank(X)$.
+
+Имеем следующие статистики
+$$F = \frac{(R_1^2 - R_0^2)/s}{R_0^2/(n-r)}, \quad \text{или} \quad B = \frac{R_0^2}{R_1^2}=\frac{L^T\mathrm{R_0}L}{L^T\mathrm{R_1}L}$$
+Выберем $L$ так, чтобы статистика $B$ имела наменьшее значение ($F$ наибольшее):
+$$\lambda = \min_L B = \min_L \frac{L^T\mathrm{R_0}L}{L^T\mathrm{R_1}L}$$
+или $\lambda$ -- наименьший корень характеристического уравнения
+$$|\mathrm{R_0} - \lambda\mathrm{R_1}|=|\mathrm{R_0}\mathrm{R_1}^{-1} - \lambda E|=0$$
+```{r}
+lambdas <- eigen(R0%*%solve(R1)); lambdas
+```
+
+Один из возможных критериев -- $\lambda$-критерий Уилкса
+$$\Lambda_p = \lambda_1 \times\ldots\times\lambda_p = \frac{|\mathrm{R_0}|}{|\mathrm{R_1}|}$$
+```{r}
+wilks <- det(R0)/det(R1); wilks
+```
+Однако значение не верное, т.к. матрица $\mathrm{R_1}$ найдна не верно.
+
+#### 2.2. Гипотеза об отсутствии эффекта фактора вид терапии (therapy)
+
+```{r}
+beta10 <- beta1; beta10[3:4] <- 0; beta10
+beta20 <- beta2; beta20[3:4] <- 0; beta20
+
+R1 <- matrix(data = 0, 2,2); 
+R1[1,1] <- t(Y1 - X%*%beta10)%*%(Y1 - X%*%beta10)
+R1[1,2] <- t(Y1 - X%*%beta10)%*%(Y2 - X%*%beta20)
+R1[2,1] <- t(Y2 - X%*%beta20)%*%(Y1 - X%*%beta10)
+R1[2,2] <- t(Y2 - X%*%beta20)%*%(Y2 - X%*%beta20)
+RM.A <- R1-R0; RM.A
+```
+Снова матрица не совпадает с ответом. Остановимся на этом с матричными вычислениями. Попробуем решить ту же задачу другим способом - в покомпонетном (скалярном) виде.
+
+### 3. Поиск оценок в скалярном виде
+Найдем оценки параметров по формулам:
+$$\hat{\mu}^{(s)} = \bar{x}_{***}^{(s)} =  \frac{1}{IJK}\sum_{i=1}^{I}\sum_{k=1}^{K} \sum_{j=1}^{J} x_{ijk}^{(s)}$$
+$$\hat{\alpha_i}^{(s)} = \bar{x}_{i**}^{(s)} -\bar{x}_{***}^{(s)} = \frac{1}{JK}\sum_{j=1}^{J}\sum_{k=1}^{K} x_{ijk}^{(s)} - \bar{x}_{***}^{(s)}$$
+$$ \hat{\beta_j}^{(s)} = \bar{x}_{*j*}^{(s)} -\bar{x}_{***}^{(s)} = \frac{1}{IK}\sum_{i=1}^{I}\sum_{k=1}^{K} x_{ijk}^{(s)} - \bar{x}_{***}^{(s)} $$
+$$ \widehat{(\alpha\beta)}_{ij}^{(s)} = \bar{x}_{ij*}^{(s)} -\bar{x}_{i**}^{(s)}-\bar{x}_{*j*}^{(s)}+\bar{x}_{***}^{(s)} = \frac{1}{K}\sum_{k=1}^{K} x_{ijk}^{(s)} - \bar{x}_{i**}^{(s)} - \bar{x}_{*j*}^{(s)} +\bar{x}_{***}^{(s)} $$
+Рассчитаем $\bar{x}_{***}^{(s)}, \bar{x}_{i**}^{(s)}, \bar{x}_{*j*}^{(s)}, \bar{x}_{ij*}^{(s)}$:
+```{r}
+means <- list()
+means$x$"1" <- mean(data$Weight1)
+means$x$"2" <- mean(data$G.age)
+
+means$xi$"1" <- tapply(X = data$Weight1, INDEX = data$Sex, FUN = mean);
+means$xi$"2" <- tapply(X = data$G.age, INDEX = data$Sex, FUN = mean)
+
+means$xj$"1" <- tapply(X = data$Weight1, INDEX = data$therapy, FUN = mean);
+means$xj$"2" <- tapply(X = data$G.age, INDEX = data$therapy, FUN = mean);
+
+means$xij$"1" <- tapply(X = data$Weight1, INDEX = list(data$Sex, data$therapy), mean);
+means$xij$"2" <- tapply(X = data$G.age, INDEX = list(data$Sex, data$therapy), mean);
+
+```
+Теперь можно легко найти оценки:
+```{r}
+estimations <- list()
+for (s in names(means$x)){
+  estimations$alpha[[s]] <- means$xi[[s]]-means$x[[s]]
+  estimations$beta[[s]] <- means$xj[[s]]-means$x[[s]]
+  estimations$alphabeta[[s]] <- means$xij[[s]]-matrix(means$xi[[s]],2,3)-t(matrix(means$xj[[s]],3,2))+means$x[[s]]
+}
+```
+
+#### 3.1. Гипотеза об отсутствии эффекта фактора пола (Sex)
+$$H_0: \alpha_1^{(s)} = ... = \alpha_I^{(s)} = 0, \qquad s \in 1:2$$
+$$H_1: \alpha_1^{(s)} \neq ... \neq \alpha_I^{(s)} \neq 0. \qquad s \in 1:2 $$
+
+$$\mathrm{R_0^2}(s,t) = \sum_{i,j,k} \Big( x_{ijk}^{(s)} - \hat{\mu}^{(s)} - \hat{\alpha_i}^{(s)} - \hat{\beta_j} + \widehat{(\alpha \beta)}_{ij}^{(s)} \Big)\Big( x_{ijk}^{(t)} - \hat{\mu}^{(t)} - \hat{\alpha_i}^{(t)} - \hat{\beta_j}^{(t)} + \widehat{(\alpha \beta)}_{ij}^{(t)} \Big) = \sum_{i,j,k} (x_{ijk}^{(s)} - \bar{x}_{ij*}^{(s)})(x_{ijk}^{(t)} - \bar{x}_{ij*}^{(t)}), $$
+```{r}
+residuals1 <- c()
+residuals2 <- c()
+for (name in names(groups)){
+  str_ij <- strsplit(name, "[.]")
+  ij <- as.vector(sapply(str_ij, as.numeric))
+  tmp_vec1 <- groups[[name]]$Weight1 - means$xij$`1`[ij[1], ij[2]]; #x_mean_ij[ij[1], ij[2]]
+  residuals1 <- append(residuals1, tmp_vec1)
+  
+  tmp_vec2 <- groups[[name]]$G.age - means$xij$`2`[ij[1], ij[2]];
+  residuals2 <- append(residuals2, tmp_vec2)
+}
+
+R0.11 <- residuals1%*%residuals1; 
+R0.22 <- residuals2%*%residuals2; 
+R0.12 <- residuals1%*%residuals2; 
+
+R0 <- matrix(c(R0.11, R0.12, R0.12, R0.22), 2,2); R0
+```
+$$\mathrm{R_1^2}(s,t) = \sum_{i,j,k} \Big( x_{ijk}^{(s)} - \hat{\mu}^{(s)} - \hat{\beta_j} + \widehat{(\alpha \beta)}_{ij}^{(s)} \Big)\Big( x_{ijk}^{(t)} - \hat{\mu}^{(t)} - \hat{\beta_j}^{(t)} + \widehat{(\alpha \beta)}_{ij}^{(t)} \Big)$$
+$$\mathrm{R^2_A(s,t)} = \sum_{i,j,k}\hat{\alpha}_i^{(s)}\hat{\alpha}_i^{(t)} = JK \sum_i^I \hat{\alpha}_i^{(s)}\hat{\alpha}_i^{(t)}$$
+Найдем $\mathrm{R_A}$
+```{r}
+# В других источниках часто можно встретить обозначения:
+# SSH - матрица сумм квадратов и произведений ошибок при выполненной гипотезе H0 (у нас это R.A или R.B или R.AB) ?
+# SSE - матрица сумм квадратов и произведений ошибок (у нас это R0)
+# SST - матрица сумм квадратов и произведений ошибок всей модели (полная дисперсия) (у нас R1)
+# SST = SSH + SSE (R1 =  R0 + R.A)
+
+R.A <- matrix(data = 0, 2, 2);
+R.A[1,1] <- J*K*estimations$alpha$`1`%*%estimations$alpha$`1`; 
+R.A[2,2] <- J*K*estimations$alpha$`2`%*%estimations$alpha$`2`; 
+R.A[1,2] <- J*K*estimations$alpha$`1`%*%estimations$alpha$`2`; 
+R.A[2,1] <- R.A[1,2]; 
+R.A
+
+```
+
+$$\mathrm{R^2_A(s,t)} = \sum_{i,j,k}\hat{\alpha}_i^{(s)}\hat{\alpha}_i^{(t)} = JK \sum_i^I \hat{\alpha}_i^{(s)}\hat{\alpha}_i^{(t)}$$
+Найдем $\mathrm{R_A}$
+Матрицу $\mathrm{R_1}$ искать не обязательно, т.к. справедливо равенство
+$$\mathrm{R_1}=\mathrm{R_0}+ \mathrm{R_A}$$
+```{r}
+R1.A <- R0 + R.A # E + H
+```
+$\lambda$-статистика Уилкса равна
+```{r}
+wilks.A <- det(R0)/det(R1.A); wilks.A
+```
+Чтобы посчитать p-значение, найдем F-аппроксимацию $\lambda$-статистики Уилкса  
+$$F = \frac{(R_1^2 - R_0^2)/s}{R_0^2/(n-r)} = \frac{L^T(\mathrm{R_1} - \mathrm{R_0})L}{L^T\mathrm{R_0}L} \times\frac{s}{n-r} = \frac{L^T\mathrm{R_A}L}{L^T\mathrm{R_0}L} \times\frac{df_{R_0}}{df_{R_A}},$$
+где $s = rank(H), \quad r = rank(X), \quad H = (0,1,0,0,0,0)$.
+
+Здесь $L$ -- это собственный вектор, отвечающий наименьшему собственному числу матрицы
+$$(\mathrm{R_1} - \mathrm{R_0})\mathrm{R_0}^{-1} = \mathrm{R_A}\mathrm{R_0}^{-1}$$
+```{r}
+lambdas.A <- eigen(R.A%*%solve(R0)); lambdas.A
+
+ind <- which.min(lambdas.A$values);
+L <- lambdas.A$vectors[, ind]
+H <- matrix(c(0,1,0,0,0,0), 1, 6); H
+
+p <- 2;# число зависимых признаков
+r <- qr(X)$rank; # ранг матрицы X
+s <- qr(H)$rank; # ранг мтарицы H
+df.RA <- s;
+df.R0 <- n-r;
+LT.RA.L <- t(L)%*%R.A%*%L; LT.RA.L
+LT.R0.L <- t(L)%*%R0%*%L; LT.R0.L
+f <- (LT.RA.L/LT.R0.L)*(df.R0/df.RA); f
+```
+
+Зная, что $F \sim F(df_{R_A}), df_{R_0})$, найдем p-значение.
+```{r}
+p.A <- 1 - pf(f, df.RA, df.R0); p.A
+```
+То, что мы нашли не сходится с тем что выдает summary.manova. Я не знаю где здесь ошибка, поэтому попробуем найти другую аппроксимацию.
+
+**$\chi^2$-квадрат аппроксимация**
+$$ \Big( \frac{p-df_{R_A} +1}{2} - df_{R_0} \Big) \log \Big(\Lambda_p(df_{R_0}, df_{R_A}) \Big) \sim \chi^2(df_{R_A})$$
+```{r}
+chi <- (0.5*(p - df.RA + 1) - df.R0)*log(wilks.A); chi
+1 - pchisq(chi, df.RA*p)
+```
+Итак, получили незначимость фактора пола.
+
+#### 3.2. Гипотеза об отсутствии эффекта фактора вида терапии (therapy)
+$$H_0: \beta_1^{(s)}= \ldots = \beta_J^{(s)} = 0$$
+$$\mathrm{R^2_B(s,t)} = \sum_{i,j,k}\hat{\beta}_i^{(s)}\hat{\beta}_i^{(t)} = IK \sum_j^J \hat{\beta}_j^{(s)}\hat{\beta}_j^{(t)}$$ 
+```{r}
+R.B <- matrix(data = 0, 2,2);
+R.B[1,1] <- I*K*estimations$beta$`1`%*%estimations$beta$`1`; 
+R.B[2,2] <- I*K*estimations$beta$`2`%*%estimations$beta$`2`; 
+R.B[1,2] <- I*K*estimations$beta$`1`%*%estimations$beta$`2`; 
+R.B[2,1] <- R.B[1,2] 
+R.B
+```
+$\lambda$-статистика Уилкса равна
+```{r}
+R1.B <- R0 + R.B; 
+wilks.B <- det(R0)/det(R1.B); wilks.B
+```
+Найдем F-аппроксимацию
+```{r}
+lambdas.B <- eigen(R.B%*%solve(R0)); lambdas.B
+
+ind <- which.min(lambdas.B$values);
+L <- lambdas.B$vectors[, ind]
+LT.RB.L <- t(L)%*%R.B%*%L; 
+LT.R0.L <- t(L)%*%R0%*%L; 
+
+H <- matrix(rbind(c(0,0,1,0,0,0),c(0,0,0,1,0,0)),2,6); 
+s <- qr(H)$rank; s # ранг матрицы H
+df.RB <- s;
+df.R0 <- n-r;
+f <- (LT.RB.L/df.RB)/(LT.R0.L/df.R0); f
+1 - pf(f, df.RB, df.R0)
+#1-pf(4.2645,4,106) # это выдает summary.manova. Почему число степеней свободы такое?
+```
+Опять же не совпали результаты. Попробуем найти F-аппроксимацию иначе.
+
+Еще один способ F-аппроксимации $\lambda$-статистики Уилкса:
+$$F = \frac{1 – \Lambda^{(1/t)}}{\Lambda^{(1/t)}} \frac{df_2}{df_1}$$
+```{r}
+k <- 6; # число факторов?
+p <- 2;
+vh <- k-1;
+ve <- n-k;
+t <- sqrt(p^2*vh^2-4)/(p^2+vh^2-5);
+
+df1 <- p*vh;
+df2 <- (ve + vh - 0.5*(p+vh+1))*t - 0.5*(p*vh - 2);
+f <- (1 - wilks.B^(1/t))/wilks.B^(1/t)*(df2/df1); f
+wilks.B
+1-pf(f, df1, df2)
+```
+Но снова не тот ответ. 
+
+Найдем $\chi^2$ аппроксимация и p-значение
+```{r}
+chi <- (0.5*(p - df.RB + 1) - df.R0)*log(wilks.B); chi
+1 - pchisq(chi, df.RB*p)
+```
+p-значение меньше 0.05, следовательно, имеем значимость фактора терапии.
+
+#### 3.3. Гипотеза об отсутствии эффекта взаимодействия двух факторов (Sex:therapy)
+
+$$H_0: (\alpha\beta)_{11} = ... = (\alpha\beta)_{IJ} = 0$$
+$$\mathrm{R^2_{AB}(s,t)} = K\sum_{i,j}(\widehat{\alpha\beta)}_{ij}^{(s)}(\widehat{\alpha\beta)}_{ij}^{(t)}$$
+
+```{r}
+alphabeta1 <- estimations$alphabeta$`1`;
+alphabeta2 <- estimations$alphabeta$`2`;
+
+R.AB <- matrix(data = 0, 2, 2);
+R.AB[1,1] <- K*(alphabeta1[1,]%*%alphabeta1[1,]+alphabeta1[2,]%*%alphabeta1[2,]);
+R.AB[2,2] <- K*(alphabeta2[1,]%*%alphabeta2[1,]+alphabeta2[2,]%*%alphabeta2[2,]);
+R.AB[1,2] <- K*(alphabeta1[1,]%*%alphabeta2[1,]+alphabeta1[2,]%*%alphabeta2[2,]);
+R.AB[2,1] <- R.AB[1,2]; R.AB
+```
+$\lambda$-статистика Уилкса равна
+```{r}
+R1.AB <- R0 + R.AB; R1.AB
+wilks.AB <- det(R0)/det(R1.AB); wilks.AB
+```
+Найдем F-аппроксимацию
+```{r}
+lambdas.AB <- eigen(R.AB%*%solve(R0)); lambdas.AB
+
+ind <- which.min(lambdas.AB$values);
+L <- lambdas.AB$vectors[, ind]
+LT.RAB.L <- t(L)%*%R.AB%*%L; 
+LT.R0.L <- t(L)%*%R0%*%L; 
+
+H <- matrix(rbind(c(0,0,0,0,1,0),c(0,0,0,0,0,1)),2,6);  
+s <- qr(H)$rank; s # ранг матрицы H
+df.RAB <- s;
+df.R0 <- n-r;
+f <- (LT.RAB.L/df.RAB)/(LT.R0.L/df.R0); f
+1 - pf(f, df.RAB, df.R0)
+```
+Снова не тот результат.
+
+Найдем хи-квадрат аппроксимацию
+```{r}
+chi <- (0.5*(p - df.RAB + 1) - df.R0)*log(wilks.AB); chi
+1 - pchisq(chi, df.RAB*p)
+```
+Видим, что влияние взимодействия факторов незначимо.
+
+**Вопрос #2**
+
+> Не совпадают оценки, найденные двумя способами для $\beta_1$
+
+```{r}
+beta1
+means$x$`1`
+estimations$alpha$`1`
+estimations$beta$`1`
+estimations$alphabeta$`1`
+```
+> И для $\beta_2$
+
+```{r}
+beta2
+means$x$`2`
+estimations$alpha$`2`
+estimations$beta$`2`
+estimations$alphabeta$`2`
+```
+> Почему такое может быть?
+
+**Вопрос #3**
+
+> Из трех аппроксимаций лямбда статистики Уилкса совпала с ответом только хи-квадрат аппроксимация. Что не так с F-аппроксимацией? Где я ошибаюсь?
+
+### 4. Проверка результатов
+
+```{r}
+#aov <- aov(Y ~ Sex*therapy, data)
+#summary(aov)
+manova.fit <- manova(Y ~ Sex*therapy, data)
+
+sum <- summary((manova.fit), test="Wilks"); sum
+sum$Eigenvalues
+sum$SS
+sum$stats
+
+```
+[Примеры с Error(A/B)](http://personality-project.org/r/r.guide/r.anova.html#oneway)
+[Пример MANOVA в R](https://www.r-bloggers.com/manova-test-statistics-with-r/)

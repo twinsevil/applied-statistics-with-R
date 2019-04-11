@@ -1,0 +1,253 @@
+---
+title: "Анализ данных типа времени жизни"
+author: "Литвинцев И.С"
+date: '21 декабря 2017 г '
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("survival")
+library("survival")
+```
+
+## Анализ данных типа времени жизни
+Исследуются данные о недоношенных младенцах, у которых вовремя не закрылся артериальный проток. Данные по дожитию - время закрытия артериального протока  при условии Alone Breathing 0
+цензурирование outcome: 1 – отказ, 0 – цензурирование.
+
+1. Построить оценку Каплана-Мейера.
+2. Оценить параметр постоянного риска с указанием доверительных интервалов. 
+3. Сравнить по лог-ранговому критерию кривые дожития у мальчиков и девочек. Построить на одном графике две оценки Каплана-Мейера.
+
+
+Day_of_clos	Время закрытия артериального протока
+
+### 1. Подготовка данных
+```{r}
+file <- "C:/Users/806263/Desktop/SPbU/Магистратура Матмех (2017-2019)/Применение статистических методов к реальным данным/Данные/baseMA.csv";
+df <- read.csv(file, sep = ";", dec = ".")
+
+df <- df[,c("Alone.Breathing", "Day_of_clos", "Sex")]
+df <- na.omit(df)
+
+head(df)
+summary(df)
+```
+### 2. Построение оценки Каплана-Мейера
+
+Роль переменной, отвечающей за время ожидания отказа, играет признак Day_of_clos. Переменная Alone.Breathing выполняет роль индикатора отказа: 1 -- отказ, 0 -- цензурирование.
+
+Цензурирование – это неполное наблюдение за временем ожидания
+отказа. Некоторые объекты не могут наблюдаться в течение полного време-
+ни до отказа.Известным оказывается только то, что до некоторого времени $t$ откза еще не наступил.
+
+По определению, кривая дожития это 
+$$S(t) = 1-F(t)=P(\tau > t)$$
+вероятность того, что отказ наступит после момента времени $t$. 
+
+При наличии цензурирования в оценке кривой дожития используется следующий принцип. Обозначим через $p_i$ вероятность того, что при условии дожить до момента $i$ отказ в этот момент так и не наступил. В качестве оценки $p_i$ будем рассматривать отношение
+$$\hat{p}_i = \frac{r_i - d_i}{r_i} = 1 - \frac{d_i}{r_i},$$
+где $r_i$ -- число объектов с отказом не ранее момента $i$, $d_i$ -- число отказов в момент $i$. Считаем что $r_1=n$. Тогда
+$$P(\tau > t_i)=P(\tau > t_{i-1})P(\tau > t_i | \tau > t_{i-1})=P(\tau > t_{i-1})p_i = p_1p_2 \ldots p_i,$$
+т.к. $P(\tau > 0)=1$. Следовательно,
+$$\hat{P}(\tau > t_i )=\frac{r_1-d_1}{r_1} \frac{r_2 - d_2}{r_2}\ldots\frac{r_i-d_i}{r_i}.$$
+
+Обозначим через 
+$$h_i = \frac{d_i}{r_i}$$
+функцию интенсивности или условную вероятность погибуть в момент $i$. Оценка кривой дожития, выраженная через интенсивности, носит название функции дожития Каплана-Мейера:
+$$\hat{S}(t_i)=\hat{P}(\tau > t_i )=\prod_{j=1}^{i}(1-h_j).$$
+Пользуясь соотношением $r_{i+1}=r_i-d_i$, построим оценку функции дожития Каплана-Мейера
+
+Отсортируем данные по возрастанию
+```{r echo=T}
+n <- nrow(df)
+
+df <- df[order(df$Day_of_clos, decreasing = F), ]
+
+num.of.repeat <- table(df$Day_of_clos)
+groups <- split(df$Alone.Breathing, df$Day_of_clos)
+times <- unique(df$Day_of_clos)
+df.times <- data.frame()
+for(i in 1:length(times)){
+  t <- times[i]
+  censor <- sum(groups[[as.character(t)]])
+  df.times[as.character(t), "d"] <- num.of.repeat[i] - censor
+  df.times[as.character(t), "z"] <- censor
+}
+
+df.times[1, "r"] <- n
+for(i in 2:length(times)){
+  df.times[i, "r"] <- df.times[i-1, "r"] - df.times[i-1, "d"] - df.times[i-1, "z"]
+}
+
+df.times$"p" <- 1 - df.times$d/df.times$r
+
+df.times[1, "S"] <- df.times[1, "p"]
+for(i in 2:length(times)){
+  df.times[i, "S"] <- df.times[i-1, "S"] *df.times[i, "p"]
+}
+
+df.times
+```
+
+
+```{r include = F}
+# Построим график найденной функции дожития. 
+time <- unique(df$Day_of_clos)
+y <- 1:max(time)
+h <- 1; 
+for(i in 1:length(time)){
+    ind <- h:time[i]
+    h <- time[i]+1
+    y[ind] <- df.times$S[i]
+}
+
+x <- 1:max(time)
+plot(x, y, type="s")
+```
+
+### 3. Доверительный интервал выживаемости
+
+Оценку точности приближения кривой выживаемости дает стандартная ошибка выживаемости, ее можно рассчитать по формуле Гринвуда: 
+$$D(\hat{S}_i)=\hat{S}_i^2 \sum_{j=1}^{i} \frac{d_j}{r_j(r_j - d_j)}, \qquad \sigma_{\hat{S}_i}=\sqrt{D(\hat{S}_i)}$$
+
+
+```{r}
+d <- df.times$d
+r <- df.times$r
+S <- df.times$S
+S.sq <- df.times$S*df.times$S
+
+frac <- d/(r*(r-d))
+D <- S.sq*cumsum(frac)
+sigma <- sqrt(D)
+```
+Доверительный интервал выживаемости в момент времени $t$ с доверительной вероятностью $1-\alpha$ определяется так: 
+$$\hat{S}_i - \sigma_{\hat{S}_i} \Phi_{\alpha} < S(t) < \hat{S}_i + \sigma_{\hat{S}_i} \Phi_{\alpha},$$
+где $\Phi_{\alpha}$ -- квантиль нормального стандартного распределения. Пусть $\alpha=0.025$.
+```{r}
+alpha <- 0.025
+CI.low <- S - sigma*qnorm(1-alpha)
+CI.up <- S + sigma*qnorm(1-alpha)
+```
+
+### 4. Оценка параметра постоянного риска 
+
+Условная вероятность гибели в момент времени $t$ выражается функцией интенсивности 
+$$h(t)=\frac{f(t)}{S(t)}=-\frac{S'(t)}{S(t)}=-(\ln S(t))'= H'(t)$$
+Минус логарифм от функции надежности называется функцией риска:
+$$H(t)=-\ln S(t), \qquad S(t)=e^{-H(t)}=e^{-\int_0^t h(u)du}$$
+Рассмотрим $h(t)=\rho$ постоянную функцию риска.
+Тогда 
+$$H(t)=-\int_0^t h(u)du=\rho t$$
+Оценим параметр постоянного риска $\rho$ по формуле
+$$\hat{\rho}=\frac{m}{W}=\frac{m}{\sum_{i=1}^n x_i},$$
+где $m$ -- общее число отказов, $W=\sum_{i=1}^n x_i$ -- суммарная наработка.
+```{r}
+m <- sum(1-df$Alone.Breathing)
+W <- sum(df$Day_of_clos)
+rho <- m/W; rho
+```
+Нанесем непрерывную функцию дожития поверх графика оценки дожития
+```{r}
+plot(time, S, col=1, lty=2, type="s")
+curve(exp(-rho*x), from=0, to=max(time), add=TRUE, col=2)
+```
+
+### 5. Сравнение кривых дожития у мальчиков и девочек. 
+
+Статистики, используемые для проверки гипотезы однородности, можно получить из одной таблицы. Для упрощения рассмотрим нецензурированные данные. Обозначим через $d_{0i}$ и $d_{1i}$ количестов отказов в группе 0 и 1 в момент врмени $i$, через $d_i = d_{0i}+d_{1i}$ число отказов в обеих группах, через $r_{0i}$ и $r_{1i}$ количество доживших до момента $i$ в группах 0 и 1 соответственно. 
+
+Найдем 
+```{r}
+df <- df[order(df$Day_of_clos, decreasing = F), ]
+
+sex.groups <- split(df[, -2], df$Day_of_clos) 
+groups <- split(df$Alone.Breathing, df$Day_of_clos)
+
+times <- unique(df$Day_of_clos)
+df.times <- data.frame()
+for(i in 1:length(times)){
+  t <- times[i]
+  event <- sum(groups[[as.character(t)]]) 
+  index <- sex.groups[[as.character(t)]]$Sex == 1
+  d1 <-  sum(sex.groups[[as.character(t)]]$Alone.Breathing[index])
+  d2 <- event - d1
+  df.times[as.character(t), "d"] <- event; #num.of.repeat[i]-event
+  df.times[as.character(t), "d1"] <- d1
+  df.times[as.character(t), "d2"] <- d2
+}
+
+df.times[1, "r"] <- n
+df.times[1, "r1"] <- sum(df$Sex == 1)
+df.times[1, "r2"] <- sum(df$Sex == 2)
+for(i in 2:length(times)){
+  df.times[i, "r"] <- df.times[i-1, "r"] - df.times[i-1, "d"] 
+  df.times[i, "r1"] <- df.times[i-1, "r1"] - df.times[i-1, "d1"] 
+  df.times[i, "r2"] <- df.times[i-1, "r2"] - df.times[i-1, "d2"] 
+}
+
+for(i in 1:length(times)){
+  r <- df.times[i, "r"]
+  d <- df.times[i, "d"]
+  r1 <- df.times[i, "r1"]
+  r2 <- df.times[i, "r2"]
+  #df.times[i, "Log-rank"] <-(d*r1*r2*(r - d))/(r^2*(r-1))
+  df.times[i, "D_i"] <-(d*r1*r2)/(r^2)
+}
+
+df.times
+```
+
+Лог-ранговый критерий проверки однородности основан на асимптотической нормальности числа отказов $d_0$, которое в случае однороднх выборок имеет нормальное распределение со следующими средним и дисперсией:
+$$E_0 = \sum_{i=1}^n \frac{d_i r_{0i}}{r_i}, \qquad D = \sum_{i=1}^{n} d_i \frac{r_{0i} r_{1i} (r_i - d_i)}{r_i^2(r_i - 1)}$$
+```{r}
+E0 <- sum(df.times$d*df.times$r1/df.times$r)
+d0 <- sum(df.times$d1)
+D <- sum(df.times$D_i)
+```
+
+Статистика лог-рангового критерия в случае однородных кривых дожития имеет распределение хи-квадрат с одной степенью свободы:
+$$\frac{(d_0 - E_0)^2}{D} \sim \chi^2(1)$$
+```{r}
+chi <- (d0 - E0)^2/D; chi
+pvalue <- 1 - pchisq(chi, 1); pvalue
+```
+p-значение достаточно большое, значит нет оснований отклолнить гипотезу однородности.
+
+Проверим полученные результаты, построим графики кривых дожитий для мальчиков и девочек.
+```{r}
+fit.surdif <- survdiff(Surv(Day_of_clos, event=Alone.Breathing) ~ Sex, df, rho=0)
+fit.surdif
+fit.surdif$var
+fit.surdif$exp
+
+fit.surv2 <- survfit(Surv(Day_of_clos, event=Alone.Breathing) ~ Sex, df, type="kaplan-meier")
+
+summary(fit.surv2)
+plot(fit.surv2, col=1:2)
+
+#fit.cox <- coxph(Surv(Day_of_clos, event=Alone.Breathing) ~ Sex, df)
+#summary(fit.cox)
+```
+
+### 6. Проверка реультатов
+
+```{r}
+#?coxph
+fit.surv <- survfit(Surv(Day_of_clos, event=1-Alone.Breathing) ~ 1, df, type="kaplan-meier")
+
+summary(fit.surv)
+```
+
+Нарисуем на одном графике кривую дожития и ДИ, найденные нами (черный цвет), и кривую дожития и ДИ, полученные с помощью встроенной функции (зеленый цвет)
+```{r}
+# сверка значений доверительных интервалов
+#data.frame(my.CI.low = CI.low,  CI.low= fit.surv$lower, my.CI.up = CI.up, CI.up=fit.surv$upper)
+plot(time, S, type="s",ylim=c(0,1),lwd=3)
+lines(time, CI.low,type="s",lty=2)
+lines(time,CI.up,type="s",lty=2)
+lines(fit.surv, mark.time=FALSE, col=3, conf.int=TRUE, lty=2)
+```
+Видим, что доверительные интервалы немного различаются. 
+
+

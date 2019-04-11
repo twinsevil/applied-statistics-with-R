@@ -1,0 +1,427 @@
+---
+title: "Дискриминантный анализ"
+author: "Литвинцев И.С"
+date: '10 декабря 2017 г '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## I. Линейный дискриминантный анализ
+Исследуются данные о недоношенных младенцах, у которых вовремя не закрылся артериальный проток. 
+
+Построить процедуры линейной классификации по восьми независимым признакам, прогнозирующим бронхо-лёгочную дисплазию.
+
+Требуется
+
+а) определить значимость классификации
+б) построить дискриминантную функцию
+в) оценить вероятности ошибочных классификаций, 
+г) указать апостериорные вероятности для неправильно классифицированных данных.
+д) Сравнить основную процедуру с пошаговой. 
+
+Независимые признаки:
+
+1)	O2.1	Насыщение крови кислородом до
+2)	O2.2 	Насыщение крови кислородом после
+3)	Diuresis1	Диурез до
+4)	Diuresis.2	Диурез после
+5)	PA1	Артериальное давление до
+6)	PA2	Артериальное давление после
+7)	Р.Р.1	Пульсовое давление до
+8)	PP2	Пульсовое давление после
+
+Прогнозируемая переменная (осложнения):
+
+1)  BLD	Бронхо лёгочная дисплазия
+
+~~2)  RN	ретинопатия 3)  IVB	Осложнения ЖКТ 4)  NEC	Сепсис 5)  Outcome	Смерть: 1 - выжил~~
+
+### 1. Подготовка данных
+```{r data}
+file <- "C:/Users/806263/Desktop/SPbU/Магистратура Матмех (2017-2019)/Применение статистических методов к реальным данным/Данные/baseMA.csv";
+df <- read.csv(file, sep = ";", dec = ".")
+
+features <- c("O2.1", "O2.2", "Diuresis1", "Diuresis.2", "PA1", "PA2", "Р.Р.1", "PP2")
+
+df <- subset(df, select = c(O2.1, O2.2, Diuresis1, Diuresis.2, PA1, PA2, Р.Р.1, PP2, BLD)) 
+
+df <- na.omit(df)
+classes <- c("BLD") #, "RN", "IVB", "NEC", "Outcome")
+```
+
+Переменная BLD (Бронхо лёгочная дисплазия) имеет 5 уровней. Нас будет интересовать  бинарная классификация, поэтому превратим 5 уровней в 2.
+
+```{r}
+k <- list()
+p <- length(features)
+
+for(class in classes){
+  df[[class]] <- as.numeric(df[[class]] >= 1)
+  df[[class]] <- as.factor(df[[class]])
+  k[[class]] <- length(unique(df[[class]]))
+  df[[class]] <- as.factor(df[[class]])
+}
+
+head(df)
+```
+
+
+
+### 2. Строим дискриминантную функцию
+
+Теперь мы можем выделить группы индивидов, принадлежащих разным классам. Подсчитаем количество индивидов в каждом классе.
+```{r}
+X <- list()
+n <- list()
+
+for(class in classes){
+  X[[class]] <- split(df, df[[class]])
+  for(name in names(X[[class]])){
+    if(nrow(X[[class]][[name]]) > 1){
+      n[[class]][[name]] <- nrow(X[[class]][[name]])
+    }
+  }
+}
+```
+
+Найдем $N$ -- число всех индивидов. 
+```{r}
+N <- nrow(df); N
+rownames(df) <- 1:nrow(df)
+```
+
+Найдем оценки векторов средних и объединенную выборочную ковариационную матрицу.
+$$\bar{X}_i = \frac{1}{n_i} \sum_{j=1}^{n_i} (X_i)_j, \qquad i \in 1:p$$
+Если $\mathrm{X}_i$ -- матрица центрированных данных, то выборочная ковариационная матрица ищется по формуле. 
+$$S_i = \frac{(\mathrm{X}_i)^T\mathrm{X}_i}{n_i - 1}$$
+А в качестве объединенной выборочной ковариационной матрицы используем выражение:
+$$ S = \frac{ \sum_{i=1}^k (n_i - 1)S_i}{ \sum_{i=1}^k n_i - k}$$
+```{r}
+means <- list()
+S.i <- list()
+S <-  list()
+
+for(class in classes){
+  S[[class]] <- matrix(0, p, p)
+
+  for(name in names(n[[class]])){
+    data.mat <- X[[class]][[name]][ , features]
+    # аргумент 2 означает, что на вход функции mean подаются строки датафрейма X[[class]]
+    means[[class]][[name]] <- apply(data.mat, 2, mean) 
+    
+    #data.mat <- scale(data.mat) #стандартизация, но с ней результат не совпадает с lda
+    
+    S.i[[class]][[name]] <-  cov(data.mat)
+    S[[class]] <- S[[class]] + S.i[[class]][[name]]*(n[[class]][[name]] - 1)
+  }
+  S[[class]] <- S[[class]]/(N - k[[class]])
+}
+```
+
+Введем дискриминантную функцию
+$$ \delta_i = \alpha_i^T X + \gamma_i + \ln q_i,$$
+где $\alpha_i = \Sigma^{-1}\mu_i$, $\gamma_i = -\frac{1}{2}\mu_i^T\Sigma^{-1}\mu_i$ на генеральном языке. Или  тоже самое на выборочном $\alpha_i = S^{-1}\bar{X}_i$, $\gamma_i = \bar{X}_i^T S^{-1} \bar{X}_i$ и $q_i = \frac{n_i}{\sum_{i=1}^k n_i}$.
+
+Найдем $\alpha_i$, $\gamma_i$ и $q_i$:
+```{r}
+alpha <- list(); gamma <- list(); q <- list(); 
+S.inv <- list()
+
+for(class in classes){
+  S.inv[[class]] <- solve(S[[class]])
+  m <- means[[class]]
+  for(name in names(n[[class]])){
+    alpha[[class]][[name]] <- S.inv[[class]]%*%m[[name]]
+    gamma[[class]][[name]] <- -(t(m[[name]])%*%S.inv[[class]]%*%m[[name]])/2
+    q[[class]][[name]] <- n[[class]][[name]]/N
+  }
+}
+```
+Наконец, определим дискриминантную функцию $\delta_i = \alpha_i^T X + \gamma_i + \ln q_i:$
+```{r}
+delta <- function(x, alpha, gamma, q){
+  delta <- c()
+  for(name in names(alpha)){
+    a <- as.matrix(alpha[[name]])
+    delta <- append(delta, t(x)%*%a + gamma[[name]] + log(q[[name]]));
+  }
+  return(delta)
+}
+```
+
+### 3. Проверка результатов с помощью функции lda()
+
+Воспользуемся встроенной фукнцией lda() для проверки результатов. 
+```{r}
+library(MASS)
+
+res.lda <- lda(BLD ~ ., df[ , rbind(as.matrix(features), "BLD")]); res.lda
+```
+Подадим выборку на вход полученной функции для предсказания.
+```{r}
+lda.pred <- predict(res.lda, df[ , rbind(as.matrix(features), "BLD")])$class
+```
+
+Теперь, используя построенную нами дискриминантную функцию, классифицируем все элементы выборки.
+```{r}
+delta.values <- matrix(0, N, k$BLD)
+delta.pred <- c()
+
+for(i in 1:N){
+  delta.values[i,] <- delta(t(df[i , features]), alpha$BLD, gamma$BLD, q$BLD)
+  delta.pred[i] <- which.max(delta.values[i, ])-1
+}
+```
+
+Сравним полученным результаты двух предсказаний между собой и с реальными значениями.
+```{r}
+predictions.df <- data.frame(lda=lda.pred, my.lda=delta.pred, real=df[ , "BLD"]); 
+
+lda.pred <- as.numeric(lda.pred)
+delta.pred <- as.numeric(delta.pred)
+
+t1 <- table(real=df[ , "BLD"], lda=lda.pred); t1
+t2 <- table(real=df[ , "BLD"], my.lda=delta.pred); t2
+t3 <- table(lda=lda.pred, my.lda = delta.pred); t3
+```
+Оценим вероятность правильных классификаций:
+```{r}
+t1.quality <- sum(diag(t1))/N
+t2.quality <- sum(diag(t2))/N
+predictions.quality <- data.frame(lda.p=t1.quality, my.lda.p=t2.quality); predictions.quality
+```
+
+Оценим вероятность ошибочных классификаций:
+$$P(2|1) = \frac{m_1}{n_1}, \qquad P(1|2)=\frac{m_2}{n_2},$$
+где $m_1$ -- число индивидов из популяции $W_1$, которые на основе процедуры классификации относятся к популяции $W_2$; $m_2$ определяется аналгично.
+```{r}
+m1 <- t2[1,2]; 
+m2 <- t2[2,1]; 
+data.frame(P21=m1/n$BLD[1], P12=m2/n$BLD[2])
+```
+Можно сделать вывод, что гораздо вероятней неправильно классифицировать индивида из первого класса, нежели из второго. 
+
+Чтобы убделиться, что дискриминантная фунция построена верно, посчитаем корреляции векторов коэффициентов, найденных вручную, с векторами коэффициентов, полученных с помощью встроенной функцией.
+```{r}
+cor(alpha$BLD$`1`-alpha$BLD$`0`, res.lda$scaling[ ,1])
+```
+Видимо, что коэффициенты положительно коррелируют.
+
+### 4. Апостериорная вероятность
+
+Найдем индивидов, которые были неправильно классифицированы.
+```{r}
+ind.mistakes <- (predictions.df[, 1] != predictions.df[, 3])
+data.mistakes <-  df[ind.mistakes, features ]
+nrow(data.mistakes)
+```
+
+Посчитаем апостериорную вероятность для неправильно классифицированных данных по формуле
+$$P(W_i | x) = \frac{e^{\delta_i}}{\sum_{j=1}^{k}e^{\delta_j}}$$
+```{r}
+p.aposter <- exp(delta.values[ind.mistakes,])/rowSums(exp(delta.values[ind.mistakes,]))
+
+head(p.aposter)
+
+```
+
+
+Построим scatter plot значений дискриминантов
+```{r}
+plot(delta.values[ , 1], delta.values[, 2], main="График дискриминантов",
+   xlab="d1", ylab="d2", pch=1) 
+```
+
+
+### 5. Значимость классификации
+Проверим гипотезу о том, что различие между классами значимо:
+$$H_0: \mu_1 = \mu_2$$ 
+Для ее проверки используют статистику вида:
+$$F = \frac{n_1 + n_2 - p -1}{(n_1 + n_2 - 2)p}\frac{n_1n_2}{n_1 + n_2} D^2 \sim F(p, \: n_1+n_2-p-1)$$
+где $D^2$ -- выборочное расстояние Махаланобиса
+$$D^2= \frac{(\bar{z}_1 - \bar{z}_2)^2}{s_z^2}, \qquad \bar{z}_i = \alpha^T\bar{X}_i, \qquad s_z^2=\alpha^T S\alpha^T, \qquad \alpha = (\bar{X}_1 - \bar{X}_2)^TS^{-1}$$
+
+```{r}
+a <- t((means$BLD$`0` - means$BLD$`1`))%*%(S.inv$BLD); a
+z0 <- a%*%means$BLD$`0`
+z1 <- a%*%means$BLD$`1`
+s <- a%*%S$BLD%*%t(a)
+D2 <- (z0-z1)^2/s
+n1 <- n$BLD[1]; n2 <- n$BLD[2]
+f <- ((n1+n2-p-1)/((n1+n2-2)*p))*((n1*n2)/(n1+n2))*D2
+pvalue <- 1 - pf(f, p, n1+n2-p-1); pvalue
+```
+При уровне значимости 0.05 получаем значимую разницу классов.
+
+### 6. Выделение подмножества признаков для наилучшего разделения классов
+Для решения этой задачи можно использовать пошаговый дискриминантный анализ, а можно методом перебора всех сочетаний признаков найти такое сочетание, для которого имеет место наилбольшая вероятность правильной классификации. 
+
+```{r}
+#install.packages('gtools')
+library(gtools)
+
+df.combinations <- data.frame()
+
+for(i in 1:p){
+  features.combination <- combinations(n=p, r=i, v=features)
+  for(j in 1:nrow(features.combination)){
+    train <- df[ , rbind(as.matrix(features.combination[j,]), "BLD")]
+    res.lda <- lda(BLD ~ ., train);
+    predict.lda <- predict(res.lda, train)$class
+    tab <- table(real=df[ , "BLD"], lda=predict.lda); 
+    pred.quality  <- sum(diag(tab))/N;
+    
+    features.str <- paste(features.combination[j,],collapse=", ")
+    df.tmp <- data.frame(features=features.str, quality= pred.quality)
+    df.combinations <- rbind(df.combinations, df.tmp)
+  }
+}
+
+df.combinations <- df.combinations[order(df.combinations$quality, decreasing = T), ]
+head(df.combinations)
+```
+Видим, что наилучшее качество классификации с вероятностью 0.83 достигается на 6 следующих признаках: Diuresis.2, Diuresis1, O2.1, O2.2, PP2, Р.Р.1
+
+-	O2.1	Насыщение крови кислородом до
+-	O2.2 	Насыщение крови кислородом после
+-	Diuresis1	Диурез до
+-	Diuresis.2	Диурез после
+-	Р.Р.1	Пульсовое давление до
+-	PP2	Пульсовое давление после
+
+
+## II. Классификация в случае биномиальных распределений
+Имеется 5 дихотомических признаков:
+
+1) Sex,
+2) Alone Breathing, 
+3) Hemotransfusion,  
+4) Horm,
+5) IN, 
+
+И дискриминантная переменная:
+
+1) бронхо-лёгочная дисплазия,  
+
+~~2) осложнения ЖКТ, 3) ретинопатия,  4) сепсис, 5) невозможное самостоятельное закрытие протока, 6) смерть.~~
+
+Требуется провести дискриминатнтый анализ для качественных признаков.
+
+
+### 1. Подготовка данных
+```{r}
+df <- read.csv(file, sep = ";", dec = ".")
+
+features <- c("Sex", "Alone.Breathing", "Hemotransfusion", "Horm", "IN")
+df.features <- subset(df, select = features) 
+df.class <- df$BLD
+df <- cbind(df.features, "BLD"=df.class)
+df <- na.omit(df)
+
+classes <- c("BLD")
+
+head(df)
+
+df$Sex <- df$Sex - 1
+df$BLD <- as.factor(df$BLD)
+```
+
+Решается задача отнесения объекта к одной из $k$ популяций $W_1, \ldots, W_k$ с биномиальным распределением с известными априорными вероятностями $q_1, \ldots, q_k$. Положим
+$$P(X_j = 1 | W_i ) = p_{ij}, \qquad P(X_j = 0 | W_i ) = 1 - p_{ij},  \qquad i \in 1:k, \; j \in 1:p.$$
+Тогда закон распределения имеет вид
+$$f_i(x_j) = p_{ij}^{x_j}(1-p_{ij})^{1 - x_j}, \qquad x_j \in \{0, 1 \}$$
+При независимости признаков $X_1, \ldots, X_p$ совместный закон распределения имеет вид
+$$f_i(x) = f_i(x_1) \cdot \ldots \cdot f_i(x_p), \qquad i\in 1:k, \quad x = (x_1, \ldots, x_p)^T.$$
+Вектор $x$ относится к популяции $W_i$ с максимальной величиной апостериорной вероятности, которая при одинаковой стоимости ошибочной классификации имеет вид: 
+$$P(W_i | x) = \frac{q_i f_i(x)}{\sum_{m=1}^k q_m f_m(x)}$$
+Пусть $n_{i}$ число индивидов из популяции $W_i$, из них $n_{ij}$ имеют $j$-ый признак. Тогда оценка $\hat{p}_{ij}=n_{ij}/n_i$. Если априорные вероятности неизвестны, то их оценками являются $\hat{q}_i = n_i/n$, где $n_1 + \ldots + n_k = n$.
+
+Найдем число признаков, чисо классов и разобьем даные на группы с помощью уровней дискриминантного признака.
+```{r}
+p <- length(features)
+k <- length(unique(df$BLD))
+n <- nrow(df)
+rownames(df) <- 1:n # перенумеровали строки 
+X <- split(df[ , features], df$BLD)
+```
+Посчитаем $n_i$, $n_{ij}$, $\hat{q}_i$, $p_{ij}$:
+```{r}
+ni <- list(); nij <- list(); q <- list()
+pij <- list()
+
+for(class in names(X)){
+  nij[[class]] <- colSums(X[[class]][, features])
+  ni[[class]] <- nrow(X[[class]])
+  q[[class]] <- ni[[class]]/n
+  pij[[class]] <- nij[[class]]/ni[[class]]
+}
+```
+Построим функцию $f_i(x)$:
+```{r}
+fij <- function(pij, xj){
+  fij <- (pij^xj)*(1 - pij)^(1-xj)
+  return(fij)
+}
+
+fi <- function(pij, x){
+  fi <- 1;
+  for(j in 1:length(x)){
+    fi <- fi*fij(pij[j], x[j])
+  }
+  return(fi)
+}
+
+```
+
+Основываясь на формуле апостериорной вероятности $P(W_i | x) = \frac{q_i f_i(x)}{\sum_{m=1}^k q_m f_m(x)}$, найдем к какому классу принадлежат индивиды нашей выборки.
+```{r}
+aposter.mat <- matrix(0, n, k)
+for(j in 1:n){
+  for(i in 1:k){
+    aposter.mat[j, i] <- q[[i]]*fi(pij[[i]], df[j, features])
+  }
+}
+
+aposter.mat <- aposter.mat/rowSums(aposter.mat)
+
+binom.pred <- c()
+for(i in 1:n){
+  binom.pred[i] <- which.max(aposter.mat[i, ])-1
+}
+head(binom.pred)
+```
+
+
+### 2. Проверка результатов с помощью функции lda()
+
+Воспользуемся встроенной фукнцией lda() для проверки результатов. 
+```{r}
+res.lda <- lda(BLD ~ ., df[ , rbind(as.matrix(features), "BLD")]); res.lda
+
+lda.pred <- predict(res.lda, df[ , rbind(as.matrix(features), "BLD")])$class
+```
+
+
+
+Сравним полученные результаты предсказаний
+```{r}
+df.compare <- data.frame(pred.class=binom.pred, real=df[ , "BLD"], lda=lda.pred)
+
+t1 <- table(real=df[ , "BLD"], my.lda=binom.pred); t1
+t2 <- table(real=df[ , "BLD"], lda=lda.pred); t2
+t3 <- table(my.lda=binom.pred, lda=lda.pred); t3
+```
+
+Оценим качество предсказаний
+```{r}
+t1.quality <- sum(diag(t1))/n; 
+t2.quality <- sum(diag(t2))/n; 
+t3.quality <- sum(diag(t3))/n; 
+
+predictions.quality <- data.frame(lda.p=t1.quality, my.lda.p=t2.quality); predictions.quality
+```
+Видим, что качество наших предсказаний такое же как качество предсказаний функции lda().
+
