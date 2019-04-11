@@ -1,0 +1,227 @@
+---
+title: "Дисперсионный анализ для зависимых выборок (Reapeted ANOVA)"
+author: "Литвинцев И.С"
+date: '28 ноября 2017 г '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Дисперсионный анализ для зависимых выборок
+
+### 1. Подготовка данных
+
+Исследуются данные о недоношенных младенцах, у которых вовремя не закрылся артериальный проток. 
+Выполним проверку значимости фактора  пола (Sex) и фактора времени на зависимую переменную "масса" в два момента времени (Weight1 и Weight2).
+
+Факторы:
+
+1) Sex -	Пол (1-м, 2-д)
+2) Индивиды
+3) Время (измерения веса в 1-ый и 2-ой моменты времени - Weight1, Weight2)
+
+Зависимая переменная:
+
+values - Масса 
+
+```{r data}
+data <- read.csv("C:/Users/806263/Desktop/SPbU/Магистратура Матмех (2017-2019)/Применение статистических методов к реальным данным/Данные/baseMA.csv", sep = ";", dec = ".")
+
+data <- data[, c("Sex", "Weight1", "Weight2")]
+data <- na.omit(data)
+head(data)
+```
+
+Посчитаем количество элементов в каждой группе.
+
+```{r}
+n.i <- tapply(X = data$Weight1, INDEX = data$Sex, FUN = length); n.i
+```
+С помощью функции stack() cведем переменную вес в один признак (values).
+```{r}
+
+t <- ncol(data) - 1; #число уровней фактора С (число временных точек)
+
+data.stack <- data.frame(stack(data[,-1]),
+              individ = as.factor(rep(seq(nrow(data)), t)),
+              Sex = as.factor(rep(data$Sex, t)))
+names(data.stack)[2] <- "time"
+head(data.stack)
+n <- n.i[1] + n.i[2] # число уровней фактора B (число индивидов)
+r <- length(unique(data.stack$Sex)) # число уровней фактора А (число различных полов)
+
+data.frame(n=n, t=t, r=r)
+```
+
+### 2. Модель дисперсионного анализа для зависимых выборок
+Рассмотрим данные вида $x_{(i)jk}$, где $i \in 1:r$ -- уровни фактора A (пол) с фиксированными эффектами, $j \in 1:n$ -- уровни фактора B (индивиды), $k \in 1:t$ -- уровни временного фактора C со случайными эффектами. Поскольку фактор A является следствием фактора индивида, то его индекс при наличии индекса $j$ заключаем в скобки, $n_1 + \ldots + n_r = n$. Требуется выяснить влияние факторов A и C на переменную Weight (вес, измеренный в два момента времени).
+Модель имеет вид:
+
+$$x_{(i)jk} = \mu + \alpha_i + c_k + (\alpha c)_{ik} + \varepsilon_{(i)j}^1 + \varepsilon_{(i)jk}, \quad i \in 1:I, \: j \in 1:J, \: k=1:K $$
+
+где $\varepsilon_{(i)j}^1$ -- ошибка, обусловленная влиянием индивида, $\varepsilon_{(i)jk}$ - ошибка наблюдения, $\alpha_i$ -- фиксированный дифференциальный эффект фактора Sex, $c_k$ -- дифференциальный эффект фактора времени, величина $(\alpha c)_{ik}$ -- эффект взаимодействия двух факторов; $\mu$ -- генеральное среднее. 
+
+Найдем оценки параметров по формулам:
+$$\hat{\mu} = \bar{x}_{***} = \frac{1}{nt}\sum_{k=1}^{t} \sum_{j=1}^{n} x_{(i)jk} = \frac{1}{nt}\sum_{i=1}^{r} \sum_{j=1}^{n_i} \sum_{k=1}^{t}  x_{(i)jk}$$
+$$\hat{\alpha_i} = \bar{x}_{i**} -\bar{x}_{***}$$
+$$\bar{x}_{i**} = \frac{1}{n_i t}\sum_{k=1}^t \sum_{j=1}^{n_i} x_{(i)jk}, \qquad i \in 1:r$$
+$$\bar{x}_{**k} = \frac{1}{n} \sum_{j=1}^{n} x_{(i)jk}, \qquad k \in 1:t$$
+$$\bar{x}_{i*k} = \frac{1}{n_i} \sum_{j=1}^{n_i} x_{(i)jk}, \qquad i \in 1:r, \quad k \in 1:t $$
+$$\bar{x}_{(i)j*} = \frac{1}{t} \sum_{k=1}^{t} x_{(i)jk}, \qquad i \in 1:r, \quad j \in 1:n$$
+Рассчитаем $\bar{x}_{***}, \bar{x}_{i**}, \bar{x}_{**k}, \bar{x}_{i*k}, \bar{x}_{(i)j*}$:
+```{r}
+means <- list()
+means$x <- mean(data.stack$values); means$x
+means$x.i <- tapply(X = data.stack$values, INDEX = data.stack$Sex, FUN = mean); means$x.i
+means$x.k <- tapply(X = data.stack$values, INDEX = data.stack$time, FUN = mean); means$x.k
+means$x.ik <- tapply(X = data.stack$values, INDEX = list(data.stack$Sex, data.stack$time), FUN = mean); means$x.ik
+means$x.ij <- tapply(X = data.stack$values, INDEX = data.stack$individ, FUN = mean); means$x.ij
+```
+
+Общий источник вариации $Q$ с числом степеней свободы $df_Q = nt-1$:
+$$Q = \sum_{k=1}^t \sum_{j=1}^{n} \big(x_{(i)jk} - \bar{x}_{***}\big)^2$$
+```{r}
+SS <- list() # список, хранящий суммы квадратов
+df <- list() # список, хранящий степени свободы сумм квадратов
+
+SS$Q <- (data.stack$values - means$x)%*%(data.stack$values - means$x);
+
+```
+
+$$Q = Q_1 + Q_2, $$
+где $Q_1$ -- источник вариации, обусловленный различием индивидов, с числом степеней свободы $df_{Q_1} = n-1$:
+$$Q_1 = t \sum_{j=1}^{n} \big(\bar{x}_{(i)j*} - \bar{x}_{***}\big)^2 = t\sum_{i=1}^{r} n_i \big( \bar{x}_{i**} - \bar{x}_{***}\big)^2 + t\sum_{j=1}^{n} \big( \bar{x}_{(i)j*} - \bar{x}_{i**}\big)^2 = Q_A +Q_{1e},$$
+где $Q_A$ -- источник вариации, обусловленный влиянием фатора А (пола), с числом степеней свободы $df_{Q_A} = r-1$:
+$$Q_A = t\sum_{i=1}^{r} n_i \big( \bar{x}_{i**} - \bar{x}_{***}\big)^2, $$
+а $Q_{1e}$ -- ошибка с числом степеней свободы $df_{Q_{1e}}=n-r$:
+$$ Q_{1e} = t\sum_{j=1}^{n} \big( \bar{x}_{(i)j*} - \bar{x}_{i**}\big)^2. $$
+```{r}
+SS$Q.A <- t*(n.i[1]*(means$x.i[1] - means$x)^2 + n.i[2]*(means$x.i[2] - means$x)^2); SS$Q.A
+
+ind <- data.stack$Sex == 1
+man <- means$x.ij[ind]
+tmp.man <- man[!is.na(man)]
+woman <- means$x.ij[!ind]
+tmp.woman <- woman[!is.na(woman)]
+
+
+SS$Q.1e <- t*((tmp.man - means$x.i[1])%*%(tmp.man - means$x.i[1]) + (tmp.woman - means$x.i[2])%*%(tmp.woman - means$x.i[2])); SS$Q.1e
+
+SS$Q.1 <- SS$Q.1e + SS$Q.A; 
+
+df$Q.A <- r-1
+df$Q.1e <- n-r
+```
+
+Оставшийся исчтоник вариации $Q_2$ можно разложить на сумму источников вариаций, обусловленных влиянием временного фактора $C$, влиянием фактора взаимодествия факторов $A$ и $C$ (пола и времени) и ошибки $Q_{err}$.
+$$Q_2 = Q - Q_1 = \sum_{k=1}^t \sum_{j=1}^{n} \big(x_{(i)jk} - \bar{x}_{(i)j*}\big)^2 = Q_C + Q_{AC} + Q_{err}, $$
+где $Q_C$ имеет число степеней свободы $df_{Q_C} = t-1$:
+$$Q_C = n \sum_{k=1}^{t} \big( \bar{x}_{**k} - \bar{x}_{***}\big)^2.$$
+$Q_{AC}$ имеет число степеней свободы $df_{Q_AC} = (t-1)(r-1)$:
+$$Q_{AC} = \sum_{i=1}^r n_i \sum_{k=1}^{t} \big( \bar{x}_{i*k} - \bar{x}_{i**} - \bar{x}_{**k} + \bar{x}_{***} \big)^2.$$
+
+И число степеней свободы $Q_{err}$ равно $df_{Q_{err}} = (t-1)(n-r)$:
+$$Q_{err} = \sum_{j=1}^n \sum_{k=1}^{t} \big( \bar{x}_{(i)jk} - \bar{x}_{(i)j*} - \bar{x}_{i*k} + \bar{x}_{i**} \big)^2$$
+```{r}
+SS$Q.C <- n*(means$x.k - means$x)%*%(means$x.k - means$x); SS$Q.C
+
+tmp1 <- means$x.ik[1,] - means$x.i[1] - means$x.k + means$x
+tmp2 <- means$x.ik[2,] - means$x.i[2] - means$x.k + means$x
+SS$Q.AC <- n.i[1]*tmp1%*%tmp1 + n.i[2]*tmp2%*%tmp2; SS$Q.AC
+
+SS$Q.2 <- SS$Q - SS$Q.1
+SS$Q.err <-  SS$Q.2 - SS$Q.C - SS$Q.AC; SS$Q.err
+
+df$Q.C <- t-1
+df$Q.AC <- (t-1)*(r-1)
+df$Q.err <- (t-1)*(n-r)
+```
+
+
+#### 2.1. Гипотеза об отсутствии эффекта фактора пола (Sex)
+$$H_0: \alpha_1 = ... = \alpha_r = 0$$
+Для проверки этой гипотезы используется статистика 
+$$F = \frac{MQ_{A}}{MQ_{1e}} \sim F(df_{A}, df_{1e}),$$
+```{r}
+F <- list(); MSS <- list(); p.value <- list()
+MSS$MQ.A <- SS$Q.A/df$Q.A;
+MSS$MQ.1e <- SS$Q.1e/df$Q.1e
+F$A <- MSS$MQ.A/MSS$MQ.1e; F$A
+p.value$A <- 1-pf(F$A, df$Q.A, df$Q.1e); p.value$A
+```
+При уровне значимости $\alpha = 0.05$ нет оснований отклонить гипотезу. Следовательно, нет значимого влияния фактора пола.
+
+#### 2.2. Гипотеза об отсутствии случайного эффекта фактора времени
+$$H_0: \sigma^2_C = 0$$
+
+Для проверки этой гипотезы используется статистика 
+$$F = \frac{MQ_{C}}{MQ_{AC}} \sim F(df_{Q_C}, df_{Q_{AC}}),$$
+```{r}
+MSS$MQ.C <- SS$Q.C/df$Q.C;
+MSS$MQ.AC <- SS$Q.AC/df$Q.AC;
+F$C1 <- MSS$MQ.C/MSS$MQ.AC; F$C1
+p.value$C1 <- 1-pf(F$C, df$Q.C, df$Q.AC); p.value$C1
+
+```
+При уровне значимости $\alpha = 0.05$ нет основания отклонить гипотезу. Случайный эффект фактора времени незначим.
+
+#### 2.3. Гипотеза об отсутствии фиксированного эффекта фактора времени 
+$$H_0: с_1 = \ldots = c_t = 0$$
+
+Для проверки этой гипотезы используется статистика 
+$$F = \frac{MQ_{C}}{MQ_{err}} \sim F(df_{Q_{C}}, df_{Q_{err}}),$$ 
+```{r}
+MSS$MQ.err <- SS$Q.err/df$Q.err;
+F$C2 <- MSS$MQ.C/MSS$MQ.err; F$C2
+p.value$C2 <- 1-pf(F$C2, df$Q.C, df$Q.err); p.value$C2
+```
+При уровне значимости $\alpha = 0.05$ отклоняем гипотезу. Фиксированный эффект фактора времени значим.
+
+
+#### 2.4. Гипотеза об отсутствии эффекта взаимодействия двух факторов (Sex:time)
+
+$$H_0: (\alpha c)_{11} = ... = (\alpha c)_{rt} = 0$$
+
+Для проверки этой гипотезы используется статистика 
+$$F = \frac{MQ_{AC}}{MQ_{err}} \sim F(df_{AC}, df_{err}),$$
+
+```{r}
+F$AC <- MSS$MQ.AC/MSS$MQ.err; F$AC
+p.value$AC <- 1-pf(F$AC, df$Q.AC, df$Q.err); p.value$AC
+```
+p-значение больше уровня значимости $\alpha = 0.05$, следовательно влияние фактора взаимодействия незначимо.
+
+### 3. Проверка результатов 
+Воспользуемся функцией aov() со специальной формулой для проверки резльтатов.
+```{r}
+formula <- values ~ Sex*time + Error(individ/time)
+aov.out <- aov(formula, data=data.stack)
+aov.S <- summary(aov.out); aov.S
+
+pp <- c(pp1 <- aov.S[[1]][[1]][1,5], aov.S[[2]][[1]][seq(2),5])
+
+names(pp) <- c("p.Sex", "p.time", "p.Sex:time"); pp
+#wm <- with(data.stack, tapply(values, list(Sex, time), mean))
+#Means <- list(wm=wm)  
+#list(pp=pp, Means=Means)
+```
+
+Сравнивая полученные значения, приходим к выводу, что все подсчеты верны.
+```{r}
+names(p.value) <- c("Sex", "time.rand", "time.fix", "Sex:time")
+data.frame(p.value)
+```
+
+**Вывод:** на исследуемый признак значимое влияние оказал лишь фиксированный эффект времени.
+
+### 6. График эффекта взаимодействия
+
+Построим [Interaction plot](http://www.cookbook-r.com/Graphs/Plotting_means_and_error_bars_(ggplot2)/) переменных пол и время (Sex:time)
+
+```{r}
+interaction.plot(data.stack$Sex, data.stack$time,  data.stack$values, col = c("red", "blue"))
+```
+
+По графику видно, что эффекта взаимодействия нет.
